@@ -6,8 +6,8 @@ import logging
 import asyncio
 import re
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
-from enum import IntEnum
+from typing import Any, Dict, Optional
+from enum import IntFlag
 
 from .disk_mapper import DiskMapper
 from .error_handling import with_error_handling, safe_parse
@@ -15,15 +15,16 @@ from .usb_detection import USBFlashDriveDetector
 
 _LOGGER = logging.getLogger(__name__)
 
-class SmartctlExitCode(IntEnum):
+class SmartctlExitCode(IntFlag):
     """Smartctl exit codes."""
     SUCCESS = 0
     COMMAND_LINE_ERROR = 1
     DEVICE_OPEN_ERROR = 2
-    SMART_OR_ATA_ERROR = 3
-    SMART_TEST_ERROR = 4
-    SMART_READ_ERROR = 5
-    SMART_PREFAIL_ERROR = 6
+    SMART_OR_ATA_ERROR = 4
+    SMART_TEST_ERROR = 8
+    SMART_READ_ERROR = 16
+    SMART_PREFAIL_ERROR = 32
+    OTHER_ERROR = 64
 
 class SmartDataManager:
     """Manager for SMART data operations."""
@@ -474,12 +475,12 @@ class SmartDataManager:
                         return error_data
 
                 # Provide more user-friendly error messages based on exit code
-                if result.exit_status == SmartctlExitCode.DEVICE_OPEN_ERROR:
+                if result.exit_status & SmartctlExitCode.DEVICE_OPEN_ERROR:
                     _LOGGER.debug(
                         "SMART data unavailable for %s (device not accessible, may be in standby or partition)",
                         device
                     )
-                elif result.exit_status == SmartctlExitCode.SMART_TEST_ERROR:
+                elif result.exit_status & SmartctlExitCode.SMART_TEST_ERROR:
                     # Exit code 4 is common for NVME partitions that don't exist as base devices
                     if 'nvme' in device.lower() and 'p' in device:
                         _LOGGER.debug(
@@ -491,7 +492,7 @@ class SmartDataManager:
                             "SMART self-test in progress for %s, data temporarily unavailable",
                             device
                         )
-                elif result.exit_status == SmartctlExitCode.SMART_OR_ATA_ERROR:
+                elif result.exit_status & SmartctlExitCode.SMART_OR_ATA_ERROR:
                     _LOGGER.warning(
                         "SMART reports potential issues for %s (exit_code=%d) - check disk health",
                         device,
