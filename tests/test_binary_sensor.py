@@ -1074,7 +1074,7 @@ def test_service_init(mock_infra_coordinator):
         server_name="tower",
         service=service,
     )
-    assert sensor._attr_unique_id == "test-uuid_service_SMB"
+    assert sensor._attr_unique_id == "test-uuid_service_smb"
     assert sensor._attr_translation_key == "service"
     assert sensor._attr_device_class == BinarySensorDeviceClass.CONNECTIVITY
     assert sensor._attr_entity_registry_enabled_default is False

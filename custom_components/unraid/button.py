@@ -239,6 +239,15 @@ class DockerContainerRestartButton(UnraidButtonEntity):
         )
         self._attr_translation_placeholders = {"name": self._container_name}
 
+    def _resolve_container_id(self) -> str:
+        """Resolve current container ID from coordinator data by stable name."""
+        data = self.coordinator.data
+        if data is not None:
+            for container in data.containers or []:
+                if container.name.lstrip("/") == self._container_name:
+                    return container.id
+        return self._container_id
+
     async def async_press(self) -> None:
         """Handle button press to restart container."""
         _LOGGER.info(
@@ -247,7 +256,8 @@ class DockerContainerRestartButton(UnraidButtonEntity):
             self._server_name,
         )
         try:
-            await self.coordinator.async_restart_container(self._container_id)
+            container_id = self._resolve_container_id()
+            await self.coordinator.async_restart_container(container_id)
             _LOGGER.debug(
                 "Container '%s' restart completed successfully", self._container_name
             )

@@ -7,7 +7,7 @@
 
 - **Domain**: `unraid` | **Prefix**: `Unraid` | **Python**: 3.13+ | **HA**: 2026.3.0+ | **Dep**: `unraid-api>=1.6.0`
 - **Code**: `custom_components/unraid/` | **Tests**: `tests/`
-- **Lint**: `./script/lint` | **Test**: `./script/test` | **Validate**: `./script/validate`
+- **Lint**: `./script/lint` | **Test**: `./script/test` | **Check**: `./script/check`
 
 ## Path-Specific Instructions
 

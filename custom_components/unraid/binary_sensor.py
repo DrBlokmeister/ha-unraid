@@ -439,12 +439,13 @@ class ServiceBinarySensor(UnraidBinarySensorEntity):
         service: Service,
     ) -> None:
         """Initialize service binary sensor."""
+        self._service_id = service.id
         self._service_name = service.name
         super().__init__(
             coordinator=coordinator,
             server_uuid=server_uuid,
             server_name=server_name,
-            resource_id=f"service_{self._service_name}",
+            resource_id=f"service_{self._service_id}",
             name=f"Service {self._service_name}",
         )
         self._attr_translation_placeholders = {"name": self._service_name}

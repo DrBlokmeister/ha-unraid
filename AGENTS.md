@@ -29,7 +29,7 @@
 ./script/test          # or: pytest
 
 # Full validation
-./script/validate
+./script/check
 
 # Setup dev environment
 ./script/setup

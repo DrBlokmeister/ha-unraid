@@ -34,6 +34,7 @@ if [[ -z ${VIRTUAL_ENV:-} ]]; then
 fi
 
 log_header "Running codespell with auto-fix"
+spell_exit=0
 codespell \
     --write-changes \
     --ignore-words-list=hass \
@@ -46,7 +47,13 @@ codespell \
     CLAUDE.md \
     GEMINI.md \
     script/ \
-    tests/ 2>&1 || true
+    tests/ 2>&1 || spell_exit=$?
+
+# codespell exits 65 when it corrects misspellings (success for auto-fix)
+if [[ $spell_exit -ne 0 && $spell_exit -ne 65 ]]; then
+    log_error "codespell failed with exit code $spell_exit"
+    exit 1
+fi
 
 # Clean up any accidental package installation from uv run
 "$SCRIPT_DIR/clean" --minimal

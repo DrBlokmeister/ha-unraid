@@ -145,7 +145,7 @@ class UnraidSystemCoordinator(DataUpdateCoordinator[UnraidSystemData]):
             return await self.api_client.typed_get_containers()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Docker data not available: %s", err)
             return []
 
@@ -155,7 +155,7 @@ class UnraidSystemCoordinator(DataUpdateCoordinator[UnraidSystemData]):
             return await self.api_client.typed_get_vms()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("VM data not available: %s", err)
             return []
 
@@ -165,7 +165,7 @@ class UnraidSystemCoordinator(DataUpdateCoordinator[UnraidSystemData]):
             return await self.api_client.typed_get_ups_devices()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("UPS data not available: %s", err)
             return []
 
@@ -323,7 +323,7 @@ class UnraidStorageCoordinator(DataUpdateCoordinator[UnraidStorageData]):
             return await self.api_client.typed_get_shares()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             # Log at debug level - shares are optional/nice-to-have
             _LOGGER.debug(
                 "Shares query failed (will continue without share data): %s", err
@@ -336,7 +336,7 @@ class UnraidStorageCoordinator(DataUpdateCoordinator[UnraidStorageData]):
             return await self.api_client.get_parity_history()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Parity history not available: %s", err)
             return []
 
@@ -474,7 +474,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_services()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Services data not available: %s", err)
             return []
 
@@ -484,7 +484,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_registration()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Registration data not available: %s", err)
             return None
 
@@ -494,7 +494,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_cloud()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Cloud data not available: %s", err)
             return None
 
@@ -504,7 +504,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_connect()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Connect data not available: %s", err)
             return None
 
@@ -514,7 +514,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_remote_access()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Remote access data not available: %s", err)
             return None
 
@@ -524,7 +524,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_vars()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Vars data not available: %s", err)
             return None
 
@@ -534,7 +534,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             return await self.api_client.typed_get_plugins()
         except UnraidAuthenticationError:
             raise
-        except (UnraidAPIError, UnraidConnectionError) as err:
+        except (UnraidAPIError, UnraidConnectionError, UnraidTimeoutError) as err:
             _LOGGER.debug("Plugins data not available: %s", err)
             return []
 
