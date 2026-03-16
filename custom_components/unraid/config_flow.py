@@ -42,6 +42,36 @@ _LOGGER = logging.getLogger(__name__)
 MAX_HOSTNAME_LEN = 253
 MIN_PORT = 1
 MAX_PORT = 65535
+MIN_UNRAID_VERSION = (7, 2, 0)
+MIN_API_VERSION = (4, 21, 0)
+
+
+def _parse_version(version: str | None) -> tuple[int, ...] | None:
+    """Parse dotted semantic-ish version strings into integer tuples."""
+    if not version:
+        return None
+
+    parts: list[int] = []
+    for segment in version.split("."):
+        digits = "".join(char for char in segment if char.isdigit())
+        if not digits:
+            break
+        parts.append(int(digits))
+
+    return tuple(parts) if parts else None
+
+
+def _is_compatible_version(
+    unraid_version: str | None, api_version: str | None
+) -> bool:
+    """Return whether the supplied versions meet minimum requirements."""
+    parsed_unraid = _parse_version(unraid_version)
+    parsed_api = _parse_version(api_version)
+
+    if parsed_unraid is None or parsed_api is None:
+        return False
+
+    return parsed_unraid >= MIN_UNRAID_VERSION and parsed_api >= MIN_API_VERSION
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -266,11 +296,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except (InvalidAuthError, CannotConnectError, UnsupportedVersionError):
             raise
         except UnraidVersionError as err:
+            _LOGGER.warning("Compatibility check failed for %s: %s", host, err)
+            server_info = await api_client.get_server_info()
+
+            if _is_compatible_version(server_info.sw_version, server_info.api_version):
+                _LOGGER.warning(
+                    "Proceeding with %s despite compatibility check failure; "
+                    "server reports Unraid=%s API=%s",
+                    host,
+                    server_info.sw_version,
+                    server_info.api_version,
+                )
+                await self._fetch_server_info(api_client, host)
+                return
+
             _LOGGER.warning(
-                "Unsupported Unraid/API version reported by %s: %s", host, err
+                "Unraid/API versions for %s are below minimum or unreadable "
+                "(Unraid=%s API=%s)",
+                host,
+                server_info.sw_version,
+                server_info.api_version,
             )
-            msg = str(err)
-            raise UnsupportedVersionError(msg) from err
+            raise UnsupportedVersionError(str(err)) from err
         except UnraidAuthenticationError as err:
             _LOGGER.warning("Authentication failed while validating %s: %s", host, err)
             msg = "Invalid API key or insufficient permissions"

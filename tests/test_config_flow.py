@@ -1602,6 +1602,54 @@ async def test_reconfigure_flow_unsupported_version_error(
     assert result2["errors"]["base"] == "unsupported_version"
 
 
+async def test_reconfigure_flow_allows_when_reported_versions_are_supported(
+    hass: HomeAssistant, mock_setup_entry: None
+) -> None:
+    """Test reconfigure succeeds when compatibility check is a false negative."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="tower",
+        data={CONF_HOST: "unraid.local", CONF_API_KEY: "old-key"},
+        options={},
+        unique_id="test-uuid",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+
+    mock_api = AsyncMock()
+    mock_api.test_connection = AsyncMock()
+    mock_api.check_compatibility = AsyncMock(
+        side_effect=UnraidVersionError("Unraid version not supported")
+    )
+    mock_api.get_server_info = AsyncMock(
+        return_value=ServerInfo(
+            uuid="test-uuid",
+            hostname="tower",
+            sw_version="7.2.2",
+            api_version="4.29.2",
+        )
+    )
+    mock_api.close = AsyncMock()
+
+    with patch(
+        "custom_components.unraid.config_flow.UnraidClient", return_value=mock_api
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_HOST: "192.168.1.100", CONF_API_KEY: "new-key"},
+        )
+
+    assert result2["type"] is FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+
+
 async def test_reconfigure_flow_unknown_error(
     hass: HomeAssistant, mock_setup_entry: None
 ) -> None:

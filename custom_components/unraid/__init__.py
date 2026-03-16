@@ -165,7 +165,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: UnraidConfigEntry) -> bo
     except UnraidSSLError as err:
         await api_client.close()
         _LOGGER.warning(
-            "TLS verification failed for %s (ignore_ssl=%s): %s",
+            "TLS verification failed for %s (ignore_ssl=%s): %s. "
+            "If you use a self-signed certificate, enable 'Ignore SSL/TLS "
+            "certificate validation' in Reconfigure.",
             host,
             ignore_ssl,
             err,
