@@ -17,7 +17,7 @@ from custom_components.unraid import (
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.unraid.const import DEFAULT_PORT, DOMAIN
+from custom_components.unraid.const import CONF_IGNORE_SSL, DEFAULT_PORT, DOMAIN
 
 # =============================================================================
 # Fixtures
@@ -35,6 +35,7 @@ def mock_config_entry() -> MockConfigEntry:
             CONF_API_KEY: "test-api-key",
             CONF_PORT: DEFAULT_PORT,
             CONF_SSL: True,
+            CONF_IGNORE_SSL: False,
         },
         options={},
         unique_id="test-uuid-123",
@@ -216,6 +217,41 @@ async def test_setup_entry_creates_coordinators(
     mock_infra_coord.assert_called_once()
 
 
+async def test_setup_entry_uses_ignore_ssl_for_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_unraid_client: MagicMock,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test setup disables TLS verification when ignore SSL is configured."""
+    mock_config_entry.data[CONF_IGNORE_SSL] = True
+    mock_config_entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.unraid.UnraidSystemCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.unraid.UnraidStorageCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.unraid.UnraidInfraCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.unraid.async_get_clientsession") as mock_session,
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", return_value=None
+        ),
+    ):
+        mock_session.return_value = MagicMock()
+        result = await async_setup_entry(hass, mock_config_entry)
+
+    assert result is True
+    mock_session.assert_called_with(hass, verify_ssl=False)
+
+
 # =============================================================================
 # Unload Entry Tests
 # =============================================================================
@@ -389,6 +425,7 @@ async def test_setup_entry_builds_configuration_url_from_lan_ip(
             CONF_HOST: "192.168.1.100",
             CONF_API_KEY: "test-api-key",
             CONF_SSL: True,
+            CONF_IGNORE_SSL: False,
         },
         unique_id="test-uuid",
     )
