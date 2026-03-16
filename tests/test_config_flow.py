@@ -25,6 +25,7 @@ from unraid_api.models import ServerInfo, UPSDevice, VersionInfo
 
 from custom_components.unraid.config_flow import CannotConnectError, SSLCertificateError
 from custom_components.unraid.const import (
+    CONF_IGNORE_SSL,
     CONF_UPS_CAPACITY_VA,
     CONF_UPS_NOMINAL_POWER,
     DEFAULT_PORT,
@@ -94,6 +95,7 @@ async def test_user_step_form_includes_port_field(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "user"
     assert "port" in result["data_schema"].schema
+    assert "ignore_ssl" in result["data_schema"].schema
 
 
 async def test_successful_connection(
@@ -118,6 +120,7 @@ async def test_successful_connection(
         "port": DEFAULT_PORT,
         "api_key": "valid-api-key",
         "ssl": True,
+        "ignore_ssl": False,
     }
 
 
@@ -146,6 +149,7 @@ async def test_successful_connection_with_custom_port(
         "port": 8080,
         "api_key": "valid-api-key",
         "ssl": True,
+        "ignore_ssl": False,
     }
     mock_client_class.assert_called_with(
         host="unraid.local",
@@ -178,6 +182,36 @@ async def test_connection_uses_default_port_when_not_specified(
         api_key="valid-api-key",
         http_port=DEFAULT_PORT,
         verify_ssl=True,
+        session=mock_client_class.call_args.kwargs["session"],
+    )
+
+
+async def test_successful_connection_with_ignore_ssl(
+    hass: HomeAssistant, mock_setup_entry: None, mock_api_client: MagicMock
+) -> None:
+    """Test successful connection with ignore SSL enabled."""
+    with patch(
+        "custom_components.unraid.config_flow.UnraidClient",
+        return_value=mock_api_client,
+    ) as mock_client_class:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_USER},
+            data={
+                "host": "unraid.local",
+                "port": 80,
+                "api_key": "valid-api-key",
+                "ignore_ssl": True,
+            },
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_IGNORE_SSL] is True
+    mock_client_class.assert_called_with(
+        host="unraid.local",
+        api_key="valid-api-key",
+        http_port=80,
+        verify_ssl=False,
         session=mock_client_class.call_args.kwargs["session"],
     )
 
@@ -692,7 +726,8 @@ async def test_ssl_error_retries_with_verify_disabled(
     created_clients[1].close.assert_awaited_once()
     assert result2["type"] is FlowResultType.CREATE_ENTRY
     assert result2["result"].unique_id == "test-uuid"
-    assert result2["data"]["ssl"] is False  # SSL verification disabled for self-signed
+    assert result2["data"]["ssl"] is True
+    assert result2["data"]["ignore_ssl"] is True
 
 
 async def test_non_ssl_connection_error_does_not_retry_with_verify_disabled(
@@ -898,6 +933,7 @@ async def test_reauth_flow_adds_ssl_flag_for_legacy_entries(
     assert result2["type"] is FlowResultType.ABORT
     assert result2["reason"] == "reauth_successful"
     assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is False
 
 
 async def test_reauth_flow_updates_ssl_flag_when_cert_changes(
@@ -948,8 +984,8 @@ async def test_reauth_flow_updates_ssl_flag_when_cert_changes(
 
     assert result2["type"] is FlowResultType.ABORT
     assert result2["reason"] == "reauth_successful"
-    # SSL flag should be updated to False since cert verification failed
-    assert entry.data[CONF_SSL] is False
+    assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is True
 
 
 async def test_reauth_flow_invalid_key(
@@ -1398,7 +1434,8 @@ async def test_reconfigure_flow_updates_ssl_flag_when_cert_changes(
     assert result2["reason"] == "reconfigure_successful"
     assert entry.data[CONF_HOST] == "192.168.1.100"
     assert entry.data[CONF_API_KEY] == "new-key"
-    assert entry.data[CONF_SSL] is False
+    assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is True
 
 
 async def test_reconfigure_flow_connection_error(
@@ -1525,6 +1562,68 @@ async def test_reconfigure_flow_invalid_auth_error(
     assert result2["errors"]["base"] == "invalid_auth"
 
 
+async def test_reconfigure_flow_ignores_false_positive_version_error(
+    hass: HomeAssistant, mock_setup_entry: None
+) -> None:
+    """Test reconfigure tolerates false-positive compatibility errors."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="tower",
+        data={
+            CONF_HOST: "unraid.local",
+            CONF_API_KEY: "old-key",
+            CONF_PORT: DEFAULT_PORT,
+            CONF_SSL: True,
+        },
+        options={},
+        unique_id="test-uuid",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+
+    mock_api = AsyncMock()
+    mock_api.test_connection = AsyncMock(return_value=True)
+    mock_api.check_compatibility = AsyncMock(
+        side_effect=UnraidVersionError("Unraid 7.2.2 (API 4.29.2) not supported")
+    )
+    mock_api.get_version = AsyncMock(
+        return_value=VersionInfo(api="4.29.2", unraid="7.2.2")
+    )
+    mock_api.get_server_info = AsyncMock(
+        return_value=ServerInfo(
+            uuid="test-uuid",
+            hostname="tower",
+            sw_version="7.2.2",
+            api_version="4.29.2",
+        )
+    )
+    mock_api.close = AsyncMock()
+
+    with patch(
+        "custom_components.unraid.config_flow.UnraidClient", return_value=mock_api
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "unraid.local",
+                CONF_PORT: DEFAULT_PORT,
+                CONF_API_KEY: "new-key",
+                CONF_IGNORE_SSL: False,
+            },
+        )
+
+    assert result2["type"] is FlowResultType.ABORT
+    assert result2["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_API_KEY] == "new-key"
+
+
 async def test_reconfigure_flow_unsupported_version_error(
     hass: HomeAssistant, mock_setup_entry: None
 ) -> None:
@@ -1630,6 +1729,7 @@ async def test_reconfigure_flow_shows_port_field(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
     assert "port" in result["data_schema"].schema
+    assert "ignore_ssl" in result["data_schema"].schema
 
 
 async def test_reconfigure_flow_updates_port(

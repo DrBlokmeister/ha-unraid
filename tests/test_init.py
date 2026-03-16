@@ -9,7 +9,11 @@ from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT, CONF_SSL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from pytest_homeassistant_custom_component.common import MockConfigEntry
-from unraid_api.exceptions import UnraidAuthenticationError, UnraidConnectionError
+from unraid_api.exceptions import (
+    UnraidAuthenticationError,
+    UnraidConnectionError,
+    UnraidSSLError,
+)
 
 from custom_components.unraid import (
     PLATFORMS,
@@ -17,7 +21,7 @@ from custom_components.unraid import (
     async_setup_entry,
     async_unload_entry,
 )
-from custom_components.unraid.const import DEFAULT_PORT, DOMAIN
+from custom_components.unraid.const import CONF_IGNORE_SSL, DEFAULT_PORT, DOMAIN
 
 # =============================================================================
 # Fixtures
@@ -35,6 +39,7 @@ def mock_config_entry() -> MockConfigEntry:
             CONF_API_KEY: "test-api-key",
             CONF_PORT: DEFAULT_PORT,
             CONF_SSL: True,
+            CONF_IGNORE_SSL: False,
         },
         options={},
         unique_id="test-uuid-123",
@@ -216,6 +221,41 @@ async def test_setup_entry_creates_coordinators(
     mock_infra_coord.assert_called_once()
 
 
+async def test_setup_entry_uses_ignore_ssl_for_session(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_unraid_client: MagicMock,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test setup disables TLS verification when ignore SSL is configured."""
+    mock_config_entry.data[CONF_IGNORE_SSL] = True
+    mock_config_entry.add_to_hass(hass)
+
+    with (
+        patch(
+            "custom_components.unraid.UnraidSystemCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.unraid.UnraidStorageCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.unraid.UnraidInfraCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch("custom_components.unraid.async_get_clientsession") as mock_session,
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", return_value=None
+        ),
+    ):
+        mock_session.return_value = MagicMock()
+        result = await async_setup_entry(hass, mock_config_entry)
+
+    assert result is True
+    mock_session.assert_called_with(hass, verify_ssl=False)
+
+
 # =============================================================================
 # Unload Entry Tests
 # =============================================================================
@@ -310,14 +350,13 @@ def test_platforms_list() -> None:
 # =============================================================================
 
 
-async def test_setup_entry_ssl_error(
+async def test_setup_entry_ssl_error_with_ignore_enabled(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
     mock_unraid_client: MagicMock,
 ) -> None:
-    """Test setup fails with SSL error and raises ConfigEntryNotReady."""
-    from unraid_api.exceptions import UnraidSSLError
-
+    """Test setup fails on TLS errors when ignore_ssl is already enabled."""
+    mock_config_entry.data[CONF_IGNORE_SSL] = True
     mock_config_entry.add_to_hass(hass)
     mock_unraid_client.test_connection.side_effect = UnraidSSLError(
         "SSL certificate verify failed"
@@ -330,6 +369,49 @@ async def test_setup_entry_ssl_error(
 
     assert "SSL certificate error" in str(exc_info.value)
     mock_unraid_client.close.assert_called_once()
+
+
+async def test_setup_entry_ssl_error_retries_with_ignore_ssl(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_unraid_client_factory: type,
+    mock_coordinator: MagicMock,
+) -> None:
+    """Test setup retries with ignore_ssl and persists that setting."""
+    from tests.conftest import create_mock_unraid_client
+
+    mock_config_entry.add_to_hass(hass)
+
+    first_client = create_mock_unraid_client()
+    first_client.test_connection.side_effect = UnraidSSLError(
+        "SSL certificate verify failed"
+    )
+
+    second_client = create_mock_unraid_client()
+    mock_unraid_client_factory.side_effect = [first_client, second_client]
+
+    with (
+        patch(
+            "custom_components.unraid.UnraidSystemCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.unraid.UnraidStorageCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch(
+            "custom_components.unraid.UnraidInfraCoordinator",
+            return_value=mock_coordinator,
+        ),
+        patch.object(
+            hass.config_entries, "async_forward_entry_setups", return_value=None
+        ),
+    ):
+        result = await async_setup_entry(hass, mock_config_entry)
+
+    assert result is True
+    assert mock_config_entry.data[CONF_IGNORE_SSL] is True
+    assert first_client.close.await_count == 1
 
 
 async def test_setup_entry_timeout_error(
@@ -389,6 +471,7 @@ async def test_setup_entry_builds_configuration_url_from_lan_ip(
             CONF_HOST: "192.168.1.100",
             CONF_API_KEY: "test-api-key",
             CONF_SSL: True,
+            CONF_IGNORE_SSL: False,
         },
         unique_id="test-uuid",
     )

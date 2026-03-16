@@ -31,6 +31,7 @@ from unraid_api.exceptions import (
 )
 
 from .const import (
+    CONF_IGNORE_SSL,
     DEFAULT_PORT,
     DOMAIN,
     REPAIR_AUTH_FAILED,
@@ -109,36 +110,48 @@ def _build_server_info(server_info: ServerInfo, host: str, use_ssl: bool) -> dic
     }
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: UnraidConfigEntry) -> bool:
-    """Set up Unraid from a config entry."""
-    host = entry.data[CONF_HOST]
-    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
-    api_key = entry.data[CONF_API_KEY]
-    use_ssl = entry.data.get(CONF_SSL, True)
-
-    # Get HA's aiohttp session for proper connection pooling
-    # Use verify_ssl based on whether SSL connection was established
-    session = async_get_clientsession(hass, verify_ssl=use_ssl)
-
-    # Create API client with injected session (using unraid_api library >=1.5.0).
-    # The library handles SSL detection automatically via HTTP probe.
+async def _connect_client(
+    hass: HomeAssistant,
+    host: str,
+    port: int,
+    api_key: str,
+    ignore_ssl: bool,
+) -> tuple[UnraidClient, ServerInfo]:
+    """Connect a client and fetch server info."""
+    session = async_get_clientsession(hass, verify_ssl=not ignore_ssl)
     api_client = UnraidClient(
         host=host,
         http_port=port,
         api_key=api_key,
-        verify_ssl=use_ssl,
+        verify_ssl=not ignore_ssl,
         session=session,
     )
+    await api_client.test_connection()
+    info = await api_client.get_server_info()
+    return api_client, info
 
-    # Test connection and get server info using library typed methods
+
+async def _connect_with_tls_fallback(
+    hass: HomeAssistant,
+    entry: UnraidConfigEntry,
+    host: str,
+    port: int,
+    api_key: str,
+    ignore_ssl: bool,
+) -> tuple[UnraidClient, ServerInfo, bool]:
+    """Connect to Unraid and optionally retry with TLS verification disabled."""
     try:
-        await api_client.test_connection()
-        info = await api_client.get_server_info()
-        # Clear any previous auth repair issues on successful connection
+        api_client, info = await _connect_client(
+            hass,
+            host,
+            port,
+            api_key,
+            ignore_ssl=ignore_ssl,
+        )
         ir.async_delete_issue(hass, DOMAIN, REPAIR_AUTH_FAILED)
+        _LOGGER.debug("Initial API connectivity check succeeded for %s", host)
+        return api_client, info, ignore_ssl
     except UnraidAuthenticationError as err:
-        await api_client.close()
-        # Create repair issue for auth failure
         ir.async_create_issue(
             hass,
             DOMAIN,
@@ -152,17 +165,131 @@ async def async_setup_entry(hass: HomeAssistant, entry: UnraidConfigEntry) -> bo
         msg = f"Authentication failed for Unraid server {host}"
         raise ConfigEntryAuthFailed(msg) from err
     except UnraidSSLError as err:
-        await api_client.close()
-        msg = f"SSL certificate error connecting to Unraid server {host}: {err}"
-        raise ConfigEntryNotReady(msg) from err
+        error_text = str(err)
+        error_lower = error_text.lower()
+        _LOGGER.warning(
+            "TLS verification failed for %s (ignore_ssl=%s): %s",
+            host,
+            ignore_ssl,
+            err,
+        )
+        _LOGGER.debug(
+            "TLS failure details for %s: error_type=%s cause_type=%s repr=%r",
+            host,
+            type(err).__name__,
+            type(err.__cause__).__name__ if err.__cause__ else "None",
+            err,
+        )
+        if "hostname" in error_lower or "ip address mismatch" in error_lower:
+            _LOGGER.info(
+                "Certificate hostname validation failed for %s. "
+                "Use the certificate hostname in host field or enable ignore_ssl.",
+                host,
+            )
+        elif "self-signed" in error_lower:
+            _LOGGER.info(
+                "Self-signed certificate detected for %s. "
+                "Enable ignore_ssl to accept it.",
+                host,
+            )
+
+        if ignore_ssl:
+            msg = f"SSL certificate error connecting to Unraid server {host}: {err}"
+            raise ConfigEntryNotReady(msg) from err
+
+        _LOGGER.info(
+            "Retrying setup for %s with TLS verification disabled. "
+            "This often happens with self-signed certificates or host/IP mismatch "
+            "(cert CN/SAN may be hostname while HA uses IP).",
+            host,
+        )
+
+        try:
+            api_client, info = await _connect_client(
+                hass,
+                host,
+                port,
+                api_key,
+                ignore_ssl=True,
+            )
+            ir.async_delete_issue(hass, DOMAIN, REPAIR_AUTH_FAILED)
+            _LOGGER.warning(
+                "Connected to %s with TLS verification disabled; persisting "
+                "ignore_ssl=True in config entry",
+                host,
+            )
+            hass.config_entries.async_update_entry(
+                entry,
+                data={
+                    **entry.data,
+                    CONF_SSL: True,
+                    CONF_IGNORE_SSL: True,
+                },
+            )
+            return api_client, info, True
+        except UnraidAuthenticationError as fallback_err:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                REPAIR_AUTH_FAILED,
+                is_fixable=True,
+                is_persistent=True,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="auth_failed",
+                translation_placeholders={"host": host},
+            )
+            msg = f"Authentication failed for Unraid server {host}"
+            raise ConfigEntryAuthFailed(msg) from fallback_err
+        except UnraidSSLError as fallback_err:
+            msg = (
+                f"SSL certificate error connecting to Unraid server {host}: "
+                f"{fallback_err}"
+            )
+            raise ConfigEntryNotReady(msg) from fallback_err
+        except (UnraidConnectionError, UnraidTimeoutError) as fallback_err:
+            _LOGGER.warning(
+                "Connection to %s failed during TLS fallback: %s",
+                host,
+                fallback_err,
+            )
+            msg = f"Failed to connect to Unraid server: {fallback_err}"
+            raise ConfigEntryNotReady(msg) from fallback_err
+        except UnraidAPIError as fallback_err:
+            msg = f"Unraid API error connecting to server {host}: {fallback_err}"
+            raise ConfigEntryNotReady(msg) from fallback_err
     except (UnraidConnectionError, UnraidTimeoutError) as err:
-        await api_client.close()
+        _LOGGER.warning("Connection to %s failed: %s", host, err)
         msg = f"Failed to connect to Unraid server: {err}"
         raise ConfigEntryNotReady(msg) from err
     except UnraidAPIError as err:
-        await api_client.close()
         msg = f"Unraid API error connecting to server {host}: {err}"
         raise ConfigEntryNotReady(msg) from err
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: UnraidConfigEntry) -> bool:
+    """Set up Unraid from a config entry."""
+    host = entry.data[CONF_HOST]
+    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+    api_key = entry.data[CONF_API_KEY]
+    use_ssl = entry.data.get(CONF_SSL, True)
+    ignore_ssl = entry.data.get(CONF_IGNORE_SSL, False)
+
+    _LOGGER.debug(
+        "Starting setup for %s with http_port=%s ssl=%s ignore_ssl=%s",
+        host,
+        port,
+        use_ssl,
+        ignore_ssl,
+    )
+
+    api_client, info, ignore_ssl = await _connect_with_tls_fallback(
+        hass=hass,
+        entry=entry,
+        host=host,
+        port=port,
+        api_key=api_key,
+        ignore_ssl=ignore_ssl,
+    )
 
     # Build server info using helper function
     server_info = _build_server_info(info, host, use_ssl)
