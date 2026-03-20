@@ -148,6 +148,15 @@ class DockerContainerSwitch(UnraidSwitchEntity):
             attrs["web_ui_url"] = container.webUiUrl
         if container.iconUrl is not None:
             attrs["icon_url"] = container.iconUrl
+        # Extended container fields (v1.7.0+)
+        extended = {
+            "project_url": container.projectUrl,
+            "support_url": container.supportUrl,
+            "registry_url": container.registryUrl,
+            "auto_start_order": container.autoStartOrder,
+            "tailscale_enabled": container.tailscaleEnabled,
+        }
+        attrs.update({k: v for k, v in extended.items() if v is not None})
         return attrs
 
     async def async_turn_on(self, **kwargs: Any) -> None:

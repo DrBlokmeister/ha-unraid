@@ -242,6 +242,7 @@ async def test_unload_entry_successful(hass: HomeAssistant) -> None:
         storage_coordinator=MagicMock(),
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=AsyncMock(),
     )
 
     with patch.object(
@@ -276,6 +277,7 @@ async def test_unload_entry_platform_failure(hass: HomeAssistant) -> None:
         storage_coordinator=MagicMock(),
         infra_coordinator=MagicMock(),
         server_info={},
+        websocket_manager=AsyncMock(),
     )
 
     with patch.object(

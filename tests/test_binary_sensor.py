@@ -41,6 +41,7 @@ from custom_components.unraid.binary_sensor import (
     DisksMissingBinarySensor,
     FilesystemsUnmountableBinarySensor,
     MoverActiveBinarySensor,
+    ParityCheckPausedBinarySensor,
     ParityCheckRunningBinarySensor,
     ParityStatusBinarySensor,
     ParityValidBinarySensor,
@@ -51,6 +52,7 @@ from custom_components.unraid.binary_sensor import (
     async_setup_entry,
 )
 from custom_components.unraid.coordinator import (
+    UnraidStorageCoordinator,
     UnraidStorageData,
     UnraidSystemCoordinator,
 )
@@ -970,6 +972,7 @@ async def test_setup_entry_creates_entities(hass):
             "manufacturer": "Supermicro",
             "model": "X11",
         },
+        websocket_manager=MagicMock(),
     )
 
     # Track added entities
@@ -1018,6 +1021,7 @@ async def test_setup_entry_no_ups(hass):
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -1052,6 +1056,7 @@ async def test_setup_entry_no_storage_data(hass):
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -2053,3 +2058,87 @@ def test_filesystems_unmountable_none_count(mock_infra_coordinator):
     )
 
     assert sensor.is_on is None
+
+
+# =============================================================================
+# ParityCheckPausedBinarySensor Tests
+# =============================================================================
+
+
+def test_parity_check_paused_init() -> None:
+    """Test ParityCheckPausedBinarySensor initialization."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    sensor = ParityCheckPausedBinarySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor._attr_unique_id == "test-uuid_parity_check_paused"
+    assert sensor._attr_translation_key == "parity_check_paused"
+    assert sensor._attr_entity_registry_enabled_default is False
+
+
+def test_parity_check_paused_true() -> None:
+    """Test ParityCheckPausedBinarySensor returns True when paused."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(
+        parity_status=ParityCheck(running=True, paused=True, progress=50)
+    )
+    sensor = ParityCheckPausedBinarySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.is_on is True
+
+
+def test_parity_check_paused_false() -> None:
+    """Test ParityCheckPausedBinarySensor returns False when not paused."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(
+        parity_status=ParityCheck(running=True, paused=False, progress=50)
+    )
+    sensor = ParityCheckPausedBinarySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.is_on is False
+
+
+def test_parity_check_paused_none_data() -> None:
+    """Test ParityCheckPausedBinarySensor returns None when no data."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = None
+    sensor = ParityCheckPausedBinarySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.is_on is None
+
+
+def test_parity_check_paused_none_parity() -> None:
+    """Test ParityCheckPausedBinarySensor returns None when parity_status is None."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    data = MagicMock()
+    data.parity_status = None
+    coordinator.data = data
+    sensor = ParityCheckPausedBinarySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.is_on is None
+
+
+def test_parity_check_paused_none_field() -> None:
+    """Test ParityCheckPausedBinarySensor returns False when paused field is None."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(parity_status=ParityCheck(running=False))
+    sensor = ParityCheckPausedBinarySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.is_on is False

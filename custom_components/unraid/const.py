@@ -80,6 +80,13 @@ DEFAULT_UPS_NOMINAL_POWER: Final = 0  # 0 = disabled, user must set for UPS Powe
 SYSTEM_POLL_INTERVAL: Final = 30  # seconds - system metrics, Docker, VMs
 STORAGE_POLL_INTERVAL: Final = 300  # seconds (5 minutes) - array, disks, SMART
 INFRA_POLL_INTERVAL: Final = 900  # seconds (15 minutes) - services, registration, cloud
+
+# =============================================================================
+# WebSocket Subscription Constants
+# =============================================================================
+WS_INITIAL_RETRY_DELAY: Final = 5  # seconds
+WS_MAX_RETRY_DELAY: Final = 300  # seconds (5 minutes)
+WS_RETRY_BACKOFF_FACTOR: Final = 2.0
 # =============================================================================
 # Platforms
 # =============================================================================

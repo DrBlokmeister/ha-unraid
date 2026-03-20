@@ -1,0 +1,92 @@
+name: Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-label and triage new issues
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+            const title = issue.title || '';
+            const labelsToAdd = [];
+
+            // --- Map bug_category / feature_category dropdown to area labels ---
+            const categoryAreaMap = {
+              'Setup/Configuration': 'area: setup',
+              'Config flow': 'area: setup',
+              'System Monitoring': 'area: system',
+              'CPU, RAM': 'area: system',
+              'Storage Monitoring': 'area: storage',
+              'Array': 'area: storage',
+              'Docker Management': 'area: docker',
+              'Container': 'area: docker',
+              'VM Management': 'area: vm',
+              'Virtual machine': 'area: vm',
+              'UPS Monitoring': 'area: ups',
+              'Battery status': 'area: ups',
+              'Notification': 'area: notifications',
+              'Unraid alerts': 'area: notifications',
+              'Network Monitoring': 'area: infra',
+              'Shares': 'area: storage',
+              'Parity': 'area: storage',
+              'Configuration': 'area: setup',
+              'Services': 'area: infra',
+              'Service management': 'area: infra',
+              'registration': 'area: infra',
+              'plugins': 'area: infra',
+              'cloud': 'area: infra',
+            };
+
+            for (const [keyword, label] of Object.entries(categoryAreaMap)) {
+              if (body.includes(keyword)) {
+                labelsToAdd.push(label);
+                break;  // Only apply first matching area label
+              }
+            }
+
+            // --- Detect entity/performance/websocket from title or body ---
+            const keywordLabelMap = {
+              'websocket': 'area: websocket',
+              'WebSocket': 'area: websocket',
+              'real-time': 'area: websocket',
+              'container stats': 'area: docker',
+              'parity check': 'area: storage',
+              'SMART': 'area: storage',
+              'array': 'area: storage',
+            };
+
+            for (const [keyword, label] of Object.entries(keywordLabelMap)) {
+              if ((title.includes(keyword) || body.includes(keyword)) && !labelsToAdd.includes(label)) {
+                labelsToAdd.push(label);
+              }
+            }
+
+            // --- Ensure needs-triage is present (should already be set by template) ---
+            const existingLabels = issue.labels.map(l => l.name);
+            if (!existingLabels.includes('needs-triage')) {
+              labelsToAdd.push('needs-triage');
+            }
+
+            // --- Apply labels ---
+            if (labelsToAdd.length > 0) {
+              // De-duplicate
+              const uniqueLabels = [...new Set(labelsToAdd)];
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: uniqueLabels,
+              });
+              core.info(`Applied labels: ${uniqueLabels.join(', ')}`);
+            }

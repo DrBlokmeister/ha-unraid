@@ -13,7 +13,6 @@ from unraid_api.models import (
     ArrayDisk,
     CapacityKilobytes,
     DockerContainer,
-    DockerContainerStats,
     NotificationOverview,
     NotificationOverviewCounts,
     ParityCheck,
@@ -34,13 +33,13 @@ from custom_components.unraid.coordinator import (
 )
 from custom_components.unraid.sensor import (
     ActiveNotificationsSensor,
+    ApiVersionSensor,
     ArrayStateSensor,
     ArrayUsageSensor,
-    ContainerCpuSensor,
-    ContainerMemoryPercentSensor,
-    ContainerMemoryUsageSensor,
+    ContainerUpdatesCountSensor,
     CpuPowerSensor,
     CpuSensor,
+    DiskErrorCountSensor,
     DiskTemperatureSensor,
     DiskUsageSensor,
     FlashUsageSensor,
@@ -51,10 +50,13 @@ from custom_components.unraid.sensor import (
     NotificationUnreadAlertSensor,
     NotificationUnreadInfoSensor,
     NotificationUnreadWarningSensor,
+    ParityElapsedSensor,
+    ParityEstimatedSensor,
     ParityProgressSensor,
     ParitySpeedSensor,
     RAMUsageSensor,
     RAMUsedSensor,
+    RegistrationExpirationSensor,
     RegistrationStateSensor,
     RegistrationTypeSensor,
     ShareUsageSensor,
@@ -71,6 +73,7 @@ from custom_components.unraid.sensor import (
     UPSOutputVoltageSensor,
     UPSPowerSensor,
     UPSRuntimeSensor,
+    UPSStatusSensor,
     UptimeSensor,
     _compute_disk_usage_percent,
     _compute_disk_used_bytes,
@@ -2716,7 +2719,7 @@ def test_upspowersensor_calculates_power() -> None:
 
 
 def test_upspowersensor_unavailable_when_nominal_power_zero() -> None:
-    """Test UPS power sensor is unavailable when nominal power is 0."""
+    """Test UPS power sensor unavailable without nominal power or API currentPower."""
     ups = UPSDevice(
         id="ups:1",
         name="APC",
@@ -2767,7 +2770,7 @@ def test_upspowersensor_available_when_nominal_power_set() -> None:
 
 
 def test_upspowersensor_attributes() -> None:
-    """Test UPS power sensor has correct attributes."""
+    """Test UPS power sensor has correct attributes (fallback calculation mode)."""
     ups = UPSDevice(
         id="ups:1",
         name="APC",
@@ -2795,6 +2798,7 @@ def test_upspowersensor_attributes() -> None:
     assert attrs["load_percentage"] == 20.5
     assert attrs["input_voltage"] == 120.0
     assert attrs["output_voltage"] == 118.5
+    assert attrs["power_source"] == "calculated"
 
 
 def test_upspowersensor_real_world_example() -> None:
@@ -2861,6 +2865,95 @@ def test_upspowersensor_none_load() -> None:
     )
 
     assert sensor.native_value is None
+
+
+def test_upspowersensor_prefers_api_current_power() -> None:
+    """Test UPS power sensor prefers currentPower from API (v1.7.0+)."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        status="Online",
+        battery=UPSBattery(chargeLevel=95, estimatedRuntime=1200),
+        power=UPSPower(
+            inputVoltage=120.0,
+            outputVoltage=118.5,
+            loadPercentage=20.5,
+            currentPower=150.0,
+            nominalPower=800,
+        ),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+
+    sensor = UPSPowerSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_capacity_va=1000,
+        ups_nominal_power=800,
+    )
+
+    # Should use API currentPower (150.0), not calculated (164.0)
+    assert sensor.native_value == 150.0
+
+
+def test_upspowersensor_available_with_api_current_power_no_nominal() -> None:
+    """Test UPS power sensor available when API provides currentPower."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        status="Online",
+        power=UPSPower(currentPower=100.0),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+    coordinator.last_update_success = True
+
+    sensor = UPSPowerSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_capacity_va=0,
+        ups_nominal_power=0,
+    )
+
+    assert sensor.available is True
+    assert sensor.native_value == 100.0
+
+
+def test_upspowersensor_attributes_with_api_power() -> None:
+    """Test UPS power sensor attributes when API provides currentPower."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        status="Online",
+        power=UPSPower(
+            inputVoltage=120.0,
+            outputVoltage=118.5,
+            loadPercentage=20.5,
+            currentPower=150.0,
+            nominalPower=800,
+        ),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+
+    sensor = UPSPowerSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_capacity_va=1000,
+        ups_nominal_power=600,
+    )
+
+    attrs = sensor.extra_state_attributes
+    assert attrs["model"] == "APC"
+    assert attrs["power_source"] == "api"
+    # nominalPower from API takes precedence over user config
+    assert attrs["nominal_power_watts"] == 800
 
 
 # =============================================================================
@@ -3554,6 +3647,7 @@ async def test_asyncsetupentry_creates_system_sensors(hass) -> None:
             "manufacturer": "Supermicro",
             "model": "X11",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3603,6 +3697,7 @@ async def test_asyncsetupentry_creates_ups_sensors(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3642,6 +3737,7 @@ async def test_asyncsetupentry_creates_disk_sensors(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3677,6 +3773,7 @@ async def test_asyncsetupentry_no_storage_data(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3714,6 +3811,7 @@ async def test_asyncsetupentry_creates_share_sensors(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3750,6 +3848,7 @@ async def test_asyncsetupentry_creates_flash_sensor(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3786,6 +3885,7 @@ async def test_asyncsetupentry_creates_cache_disk_sensors(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3833,6 +3933,7 @@ async def test_asyncsetupentry_no_ups_sensors_when_no_ups(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3878,6 +3979,7 @@ async def test_asyncsetupentry_uses_ups_capacity_from_options(hass) -> None:
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -3920,6 +4022,7 @@ async def test_asyncsetupentry_creates_parity_disk_temperature_sensors(hass) -> 
         storage_coordinator=storage_coordinator,
         infra_coordinator=MagicMock(),
         server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -4862,249 +4965,11 @@ def test_swapusedsensor_none_swap_used() -> None:
 
 
 # =============================================================================
-# Container CPU Sensor Tests
+# Container Stats Sensors — REMOVED in v1.7.0
 # =============================================================================
-
-
-def test_containercpusensor_creation() -> None:
-    """Test container CPU sensor creation."""
-    stats = DockerContainerStats(cpuPercent=5.3, memoryUsage=100000, memoryPercent=2.5)
-    container = DockerContainer(id="ct:1", name="/web", state="RUNNING", stats=stats)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerCpuSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.unique_id == "test-uuid_container_web_cpu"
-    assert sensor.native_unit_of_measurement == "%"
-    assert sensor.state_class == SensorStateClass.MEASUREMENT
-    assert sensor.translation_key == "container_cpu"
-    assert sensor._attr_translation_placeholders == {"name": "web"}
-    assert sensor.entity_registry_enabled_default is False
-
-
-def test_containercpusensor_state() -> None:
-    """Test container CPU sensor returns correct percentage."""
-    stats = DockerContainerStats(cpuPercent=12.7)
-    container = DockerContainer(id="ct:1", name="/web", state="RUNNING", stats=stats)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerCpuSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value == 12.7
-
-
-def test_containercpusensor_no_stats() -> None:
-    """Test container CPU sensor returns None when stats are None."""
-    container = DockerContainer(id="ct:1", name="/web", state="RUNNING", stats=None)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerCpuSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
-
-
-def test_containercpusensor_container_not_found() -> None:
-    """Test container CPU sensor returns None when container not in data."""
-    container = DockerContainer(id="ct:1", name="/web", state="RUNNING")
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[])  # Empty containers
-
-    sensor = ContainerCpuSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
-
-
-def test_containercpusensor_none_data() -> None:
-    """Test container CPU sensor returns None when coordinator data is None."""
-    container = DockerContainer(id="ct:1", name="/web", state="RUNNING")
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = None
-
-    sensor = ContainerCpuSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
-
-
-# =============================================================================
-# Container Memory Usage Sensor Tests
-# =============================================================================
-
-
-def test_containermemoryusagesensor_creation() -> None:
-    """Test container memory usage sensor creation."""
-    stats = DockerContainerStats(memoryUsage=104857600, memoryPercent=2.5)
-    container = DockerContainer(id="ct:1", name="/db", state="RUNNING", stats=stats)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerMemoryUsageSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.unique_id == "test-uuid_container_db_memory"
-    assert sensor.device_class == SensorDeviceClass.DATA_SIZE
-    assert sensor.native_unit_of_measurement == "B"
-    assert sensor.suggested_unit_of_measurement == "MiB"
-    assert sensor.state_class == SensorStateClass.MEASUREMENT
-    assert sensor.translation_key == "container_memory_usage"
-    assert sensor._attr_translation_placeholders == {"name": "db"}
-    assert sensor.entity_registry_enabled_default is False
-
-
-def test_containermemoryusagesensor_state() -> None:
-    """Test container memory usage sensor returns correct bytes value."""
-    stats = DockerContainerStats(memoryUsage=524288000)
-    container = DockerContainer(id="ct:1", name="/db", state="RUNNING", stats=stats)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerMemoryUsageSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value == 524288000
-
-
-def test_containermemoryusagesensor_no_stats() -> None:
-    """Test container memory usage sensor returns None when stats are None."""
-    container = DockerContainer(id="ct:1", name="/db", state="RUNNING", stats=None)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerMemoryUsageSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
-
-
-def test_containermemoryusagesensor_none_data() -> None:
-    """Test container memory usage sensor returns None when no data."""
-    container = DockerContainer(id="ct:1", name="/db", state="RUNNING")
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = None
-
-    sensor = ContainerMemoryUsageSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
-
-
-# =============================================================================
-# Container Memory Percent Sensor Tests
-# =============================================================================
-
-
-def test_containermemorypercentsensor_creation() -> None:
-    """Test container memory percent sensor creation."""
-    stats = DockerContainerStats(memoryPercent=3.8)
-    container = DockerContainer(id="ct:1", name="/cache", state="RUNNING", stats=stats)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerMemoryPercentSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.unique_id == "test-uuid_container_cache_memory_pct"
-    assert sensor.native_unit_of_measurement == "%"
-    assert sensor.state_class == SensorStateClass.MEASUREMENT
-    assert sensor.translation_key == "container_memory_percent"
-    assert sensor._attr_translation_placeholders == {"name": "cache"}
-    assert sensor.entity_registry_enabled_default is False
-
-
-def test_containermemorypercentsensor_state() -> None:
-    """Test container memory percent sensor returns correct percentage."""
-    stats = DockerContainerStats(memoryPercent=15.2)
-    container = DockerContainer(id="ct:1", name="/cache", state="RUNNING", stats=stats)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerMemoryPercentSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value == 15.2
-
-
-def test_containermemorypercentsensor_no_stats() -> None:
-    """Test container memory percent sensor returns None when stats are None."""
-    container = DockerContainer(id="ct:1", name="/cache", state="RUNNING", stats=None)
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = make_system_data(containers=[container])
-
-    sensor = ContainerMemoryPercentSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
-
-
-def test_containermemorypercentsensor_none_data() -> None:
-    """Test container memory percent sensor returns None when no data."""
-    container = DockerContainer(id="ct:1", name="/cache", state="RUNNING")
-    coordinator = MagicMock(spec=UnraidSystemCoordinator)
-    coordinator.data = None
-
-    sensor = ContainerMemoryPercentSensor(
-        coordinator=coordinator,
-        server_uuid="test-uuid",
-        server_name="test-server",
-        container=container,
-    )
-
-    assert sensor.native_value is None
+# ContainerCpuSensor, ContainerMemoryUsageSensor, ContainerMemoryPercentSensor
+# were removed because container.stats was removed from DockerContainer in
+# unraid-api v1.7.0. Stats are now only available via WebSocket subscriptions.
 
 
 # =============================================================================
@@ -5310,3 +5175,732 @@ def test_unraidversionsensor_attributes_minimal() -> None:
 
     # No api_version or os_arch in ServerInfo
     assert sensor.extra_state_attributes == {}
+
+
+# =============================================================================
+# API Version Sensor Tests
+# =============================================================================
+
+
+def test_apiversionsensor_creation() -> None:
+    """Test API version sensor entity creation."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data()
+
+    sensor = ApiVersionSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.unique_id == "test-uuid_api_version"
+    assert sensor.translation_key == "api_version"
+    assert sensor.entity_category == EntityCategory.DIAGNOSTIC
+
+
+def test_apiversionsensor_state() -> None:
+    """Test API version sensor returns the API version string."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data()
+    from unraid_api.models import ServerInfo
+
+    coordinator.data.info = ServerInfo(
+        uuid="test-uuid",
+        hostname="tower",
+        sw_version="7.2.4",
+        api_version="4.30.1",
+    )
+
+    sensor = ApiVersionSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value == "4.30.1"
+
+
+def test_apiversionsensor_none_data() -> None:
+    """Test API version sensor returns None when coordinator data is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = ApiVersionSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+def test_apiversionsensor_none_info() -> None:
+    """Test API version sensor returns None when info is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data()
+    coordinator.data.info = None
+
+    sensor = ApiVersionSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+# =============================================================================
+# UPS Energy Sensor — Auto-Detection Tests
+# =============================================================================
+
+
+def test_upsenergysensor_api_nominal_power_preferred() -> None:
+    """Test UPS energy sensor prefers API nominal power over user config."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        power=UPSPower(loadPercentage=50.0, nominalPower=900),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+
+    sensor = UPSEnergySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_nominal_power=800,  # User config value
+    )
+
+    # API value (900) should be preferred over user config (800)
+    assert sensor._get_effective_nominal_power() == 900
+
+
+def test_upsenergysensor_falls_back_to_user_config() -> None:
+    """Test energy sensor falls back to user config."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        power=UPSPower(loadPercentage=50.0),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+
+    sensor = UPSEnergySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_nominal_power=800,
+    )
+
+    assert sensor._get_effective_nominal_power() == 800
+
+
+def test_upsenergysensor_available_with_api_nominal_power() -> None:
+    """Test sensor available when API provides nominal power."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        power=UPSPower(loadPercentage=20.0, nominalPower=900),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+    coordinator.last_update_success = True
+
+    sensor = UPSEnergySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_nominal_power=0,  # User didn't configure
+    )
+
+    assert sensor.available is True
+
+
+def test_upsenergysensor_prefers_current_power_from_api() -> None:
+    """Test UPS energy sensor prefers direct currentPower from API."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC",
+        power=UPSPower(loadPercentage=50.0, currentPower=350.0, nominalPower=900),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+
+    sensor = UPSEnergySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_nominal_power=800,
+    )
+
+    # Should use currentPower (350.0), not load% * nominal (50% * 900 = 450)
+    assert sensor._calculate_current_power() == 350.0
+
+
+def test_upsenergysensor_attributes_with_api_nominal() -> None:
+    """Test UPS energy sensor attributes reflect API nominal power."""
+    ups = UPSDevice(
+        id="ups:1",
+        name="APC UPS",
+        power=UPSPower(loadPercentage=25.0, nominalPower=1000),
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+
+    sensor = UPSEnergySensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        ups=ups,
+        ups_nominal_power=800,  # User config, should be overridden by API
+    )
+
+    sensor._update_energy()
+    attrs = sensor.extra_state_attributes
+    assert attrs["nominal_power_watts"] == 1000  # From API, not user config
+
+
+# =============================================================================
+# ParityElapsedSensor Tests
+# =============================================================================
+
+
+def test_parity_elapsed_sensor_init() -> None:
+    """Test ParityElapsedSensor initialization."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    sensor = ParityElapsedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor._attr_unique_id == "test-uuid_parity_elapsed"
+    assert sensor._attr_translation_key == "parity_elapsed"
+    assert sensor._attr_device_class == SensorDeviceClass.DURATION
+    assert sensor._attr_native_unit_of_measurement == "s"
+    assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor._attr_entity_registry_enabled_default is False
+
+
+def test_parity_elapsed_sensor_value() -> None:
+    """Test ParityElapsedSensor returns elapsed seconds."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(
+        parity_status=ParityCheck(running=True, elapsed=3600, estimated=7200)
+    )
+    sensor = ParityElapsedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == 3600
+
+
+def test_parity_elapsed_sensor_none_data() -> None:
+    """Test ParityElapsedSensor returns None when no data."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = None
+    sensor = ParityElapsedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value is None
+
+
+def test_parity_elapsed_sensor_none_parity() -> None:
+    """Test ParityElapsedSensor returns None when parity_status is None."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    data = MagicMock()
+    data.parity_status = None
+    coordinator.data = data
+    sensor = ParityElapsedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value is None
+
+
+def test_parity_elapsed_sensor_none_elapsed() -> None:
+    """Test ParityElapsedSensor returns 0 when elapsed is None (no check running)."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(parity_status=ParityCheck(running=False))
+    sensor = ParityElapsedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == 0
+
+
+# =============================================================================
+# ParityEstimatedSensor Tests
+# =============================================================================
+
+
+def test_parity_estimated_sensor_init() -> None:
+    """Test ParityEstimatedSensor initialization."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    sensor = ParityEstimatedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor._attr_unique_id == "test-uuid_parity_estimated"
+    assert sensor._attr_translation_key == "parity_estimated"
+    assert sensor._attr_device_class == SensorDeviceClass.DURATION
+    assert sensor._attr_native_unit_of_measurement == "s"
+    assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor._attr_entity_registry_enabled_default is False
+
+
+def test_parity_estimated_sensor_value() -> None:
+    """Test ParityEstimatedSensor returns estimated seconds."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(
+        parity_status=ParityCheck(running=True, elapsed=3600, estimated=7200)
+    )
+    sensor = ParityEstimatedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == 7200
+
+
+def test_parity_estimated_sensor_none_data() -> None:
+    """Test ParityEstimatedSensor returns None when no data."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = None
+    sensor = ParityEstimatedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value is None
+
+
+def test_parity_estimated_sensor_none_estimated() -> None:
+    """Test ParityEstimatedSensor returns 0 when estimated is None."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(parity_status=ParityCheck(running=False))
+    sensor = ParityEstimatedSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == 0
+
+
+# =============================================================================
+# UPSStatusSensor Tests
+# =============================================================================
+
+
+def test_ups_status_sensor_init() -> None:
+    """Test UPSStatusSensor initialization."""
+    ups = UPSDevice(id="ups:1", name="APC UPS", status="OL")
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    sensor = UPSStatusSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ups=ups,
+    )
+    assert sensor._attr_unique_id == "test-uuid_ups_ups:1_status"
+    assert sensor._attr_translation_key == "ups_status"
+    assert sensor._attr_translation_placeholders == {"name": "APC UPS"}
+
+
+def test_ups_status_sensor_value_online() -> None:
+    """Test UPSStatusSensor returns OL for online."""
+    ups = UPSDevice(id="ups:1", name="APC UPS", status="OL")
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+    sensor = UPSStatusSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ups=ups,
+    )
+    assert sensor.native_value == "OL"
+
+
+def test_ups_status_sensor_value_on_battery() -> None:
+    """Test UPSStatusSensor returns OB for on battery."""
+    ups = UPSDevice(id="ups:1", name="APC UPS", status="OB")
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+    sensor = UPSStatusSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ups=ups,
+    )
+    assert sensor.native_value == "OB"
+
+
+def test_ups_status_sensor_value_on_battery_low() -> None:
+    """Test UPSStatusSensor returns OB LB for low battery."""
+    ups = UPSDevice(id="ups:1", name="APC UPS", status="OB LB")
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[ups])
+    sensor = UPSStatusSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ups=ups,
+    )
+    assert sensor.native_value == "OB LB"
+
+
+def test_ups_status_sensor_none_data() -> None:
+    """Test UPSStatusSensor returns None when no data."""
+    ups = UPSDevice(id="ups:1", name="APC UPS", status="OL")
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+    sensor = UPSStatusSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ups=ups,
+    )
+    assert sensor.native_value is None
+
+
+def test_ups_status_sensor_ups_not_found() -> None:
+    """Test UPSStatusSensor returns None when UPS removed."""
+    ups = UPSDevice(id="ups:1", name="APC UPS", status="OL")
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(ups_devices=[])
+    sensor = UPSStatusSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ups=ups,
+    )
+    assert sensor.native_value is None
+
+
+# =============================================================================
+# ContainerUpdatesCountSensor Tests
+# =============================================================================
+
+
+def test_container_updates_count_sensor_init() -> None:
+    """Test ContainerUpdatesCountSensor initialization."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor._attr_unique_id == "test-uuid_container_updates_count"
+    assert sensor._attr_translation_key == "container_updates_count"
+    assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+
+
+def test_container_updates_count_sensor_value() -> None:
+    """Test ContainerUpdatesCountSensor returns count of updatable containers."""
+    containers = [
+        DockerContainer(id="c1", name="nginx", isUpdateAvailable=True),
+        DockerContainer(id="c2", name="plex", isUpdateAvailable=False),
+        DockerContainer(id="c3", name="sonarr", isUpdateAvailable=True),
+        DockerContainer(id="c4", name="radarr", isUpdateAvailable=None),
+    ]
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=containers)
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == 2
+
+
+def test_container_updates_count_sensor_zero() -> None:
+    """Test ContainerUpdatesCountSensor returns 0 when no updates."""
+    containers = [
+        DockerContainer(id="c1", name="nginx", isUpdateAvailable=False),
+        DockerContainer(id="c2", name="plex", isUpdateAvailable=False),
+    ]
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=containers)
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == 0
+
+
+def test_container_updates_count_sensor_none_data() -> None:
+    """Test ContainerUpdatesCountSensor returns None when no data."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value is None
+
+
+def test_container_updates_count_sensor_extra_attributes() -> None:
+    """Test ContainerUpdatesCountSensor extra attributes list updatable containers."""
+    containers = [
+        DockerContainer(id="c1", name="/nginx", isUpdateAvailable=True),
+        DockerContainer(id="c2", name="plex", isUpdateAvailable=False),
+        DockerContainer(id="c3", name="/sonarr", isUpdateAvailable=True),
+    ]
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=containers)
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    attrs = sensor.extra_state_attributes
+    assert "containers" in attrs
+    assert "nginx" in attrs["containers"]
+    assert "sonarr" in attrs["containers"]
+    assert len(attrs["containers"]) == 2
+
+
+def test_container_updates_count_sensor_extra_attributes_none() -> None:
+    """Test ContainerUpdatesCountSensor extra attributes when no data."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.extra_state_attributes == {}
+
+
+def test_container_updates_count_sensor_extra_attributes_empty() -> None:
+    """Test ContainerUpdatesCountSensor extra attributes when no updates."""
+    containers = [
+        DockerContainer(id="c1", name="nginx", isUpdateAvailable=False),
+    ]
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=containers)
+    sensor = ContainerUpdatesCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.extra_state_attributes == {}
+
+
+# =============================================================================
+# RegistrationExpirationSensor Tests
+# =============================================================================
+
+
+def test_registration_expiration_sensor_init() -> None:
+    """Test RegistrationExpirationSensor initialization."""
+    coordinator = MagicMock(spec=UnraidInfraCoordinator)
+    sensor = RegistrationExpirationSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor._attr_unique_id == "test-uuid_registration_expiration"
+    assert sensor._attr_translation_key == "registration_expiration"
+    assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor._attr_entity_registry_enabled_default is False
+
+
+def test_registration_expiration_sensor_value() -> None:
+    """Test RegistrationExpirationSensor returns expiration date."""
+    coordinator = MagicMock(spec=UnraidInfraCoordinator)
+    reg = Registration(
+        id="key-id",
+        type="Pro",
+        state="valid",
+        expiration="2026-12-31",
+    )
+    coordinator.data = make_infra_data(registration=reg)
+    sensor = RegistrationExpirationSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value == "2026-12-31"
+
+
+def test_registration_expiration_sensor_none_data() -> None:
+    """Test RegistrationExpirationSensor returns None when no data."""
+    coordinator = MagicMock(spec=UnraidInfraCoordinator)
+    coordinator.data = None
+    sensor = RegistrationExpirationSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value is None
+
+
+def test_registration_expiration_sensor_none_registration() -> None:
+    """Test RegistrationExpirationSensor returns None when no registration."""
+    coordinator = MagicMock(spec=UnraidInfraCoordinator)
+    coordinator.data = make_infra_data(registration=None)
+    sensor = RegistrationExpirationSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.native_value is None
+
+
+def test_registration_expiration_sensor_extra_attributes() -> None:
+    """Test RegistrationExpirationSensor extra attributes."""
+    coordinator = MagicMock(spec=UnraidInfraCoordinator)
+    reg = Registration(
+        id="key-id",
+        type="Pro",
+        state="valid",
+        expiration="2026-12-31",
+        updateExpiration="2026-06-30",
+    )
+    coordinator.data = make_infra_data(registration=reg)
+    sensor = RegistrationExpirationSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    attrs = sensor.extra_state_attributes
+    assert attrs["update_expiration"] == "2026-06-30"
+
+
+def test_registration_expiration_sensor_extra_attributes_no_update_exp() -> None:
+    """Test RegistrationExpirationSensor extra attributes without update expiration."""
+    coordinator = MagicMock(spec=UnraidInfraCoordinator)
+    reg = Registration(
+        id="key-id",
+        type="Basic",
+        state="valid",
+        expiration="2026-12-31",
+    )
+    coordinator.data = make_infra_data(registration=reg)
+    sensor = RegistrationExpirationSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+    )
+    assert sensor.extra_state_attributes == {}
+
+
+# =============================================================================
+# DiskErrorCountSensor Tests
+# =============================================================================
+
+
+def test_disk_error_count_sensor_init() -> None:
+    """Test DiskErrorCountSensor initialization."""
+    disk = ArrayDisk(id="disk1", name="Disk 1")
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor._attr_unique_id == "test-uuid_disk_disk1_errors"
+    assert sensor._attr_translation_key == "disk_error_count"
+    assert sensor._attr_state_class == SensorStateClass.TOTAL_INCREASING
+    assert sensor._attr_native_unit_of_measurement == "errors"
+    assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor._attr_entity_registry_enabled_default is False
+    assert sensor._attr_translation_placeholders == {"name": "Disk 1"}
+
+
+def test_disk_error_count_sensor_value() -> None:
+    """Test DiskErrorCountSensor returns error count."""
+    disk = ArrayDisk(id="disk1", name="Disk 1", numErrors=5)
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(disks=[disk])
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor.native_value == 5
+
+
+def test_disk_error_count_sensor_zero() -> None:
+    """Test DiskErrorCountSensor returns 0 for no errors."""
+    disk = ArrayDisk(id="disk1", name="Disk 1", numErrors=0)
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(disks=[disk])
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor.native_value == 0
+
+
+def test_disk_error_count_sensor_none_data() -> None:
+    """Test DiskErrorCountSensor returns None when no data."""
+    disk = ArrayDisk(id="disk1", name="Disk 1")
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = None
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor.native_value is None
+
+
+def test_disk_error_count_sensor_disk_not_found() -> None:
+    """Test DiskErrorCountSensor returns None when disk not in data."""
+    disk = ArrayDisk(id="disk1", name="Disk 1")
+    other_disk = ArrayDisk(id="disk2", name="Disk 2", numErrors=3)
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(disks=[other_disk])
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor.native_value is None
+
+
+def test_disk_error_count_sensor_parity_disk() -> None:
+    """Test DiskErrorCountSensor works for parity disks."""
+    disk = ArrayDisk(id="parity1", name="Parity", numErrors=2)
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(parities=[disk])
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor.native_value == 2
+
+
+def test_disk_error_count_sensor_cache_disk() -> None:
+    """Test DiskErrorCountSensor works for cache disks."""
+    disk = ArrayDisk(id="cache1", name="Cache", numErrors=1)
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(caches=[disk])
+    sensor = DiskErrorCountSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        disk=disk,
+    )
+    assert sensor.native_value == 1

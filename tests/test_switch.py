@@ -127,6 +127,37 @@ def test_container_switch_attributes() -> None:
     assert attrs["icon_url"] == "https://cdn/icons/web.png"
 
 
+def test_container_switch_attributes_v170_fields() -> None:
+    """Test container switch includes v1.7.0 fields in extra attributes."""
+    container = DockerContainer(
+        id="ct:1",
+        name="/web",
+        state="RUNNING",
+        image="nginx:latest",
+        projectUrl="https://nginx.org",
+        supportUrl="https://nginx.org/support",
+        registryUrl="https://hub.docker.com/_/nginx",
+        autoStartOrder=1,
+        tailscaleEnabled=True,
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=[container])
+
+    switch = DockerContainerSwitch(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        container=container,
+    )
+
+    attrs = switch.extra_state_attributes
+    assert attrs["project_url"] == "https://nginx.org"
+    assert attrs["support_url"] == "https://nginx.org/support"
+    assert attrs["registry_url"] == "https://hub.docker.com/_/nginx"
+    assert attrs["auto_start_order"] == 1
+    assert attrs["tailscale_enabled"] is True
+
+
 def test_container_switch_attributes_filters_none() -> None:
     """Test container switch filters out None values from attributes."""
     container = DockerContainer(
@@ -1316,6 +1347,7 @@ async def test_setup_creates_control_switches(hass) -> None:
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -1354,6 +1386,7 @@ async def test_setup_creates_container_switches(hass) -> None:
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -1390,6 +1423,7 @@ async def test_setup_creates_vm_switches(hass) -> None:
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -1424,6 +1458,7 @@ async def test_setup_no_containers_or_vms(hass) -> None:
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
@@ -1459,6 +1494,7 @@ async def test_setup_no_coordinator_data(hass) -> None:
             "uuid": "test-uuid",
             "name": "tower",
         },
+        websocket_manager=MagicMock(),
     )
 
     added_entities = []
