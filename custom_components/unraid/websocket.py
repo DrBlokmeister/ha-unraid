@@ -124,7 +124,7 @@ class UnraidWebSocketManager:
                 if not self._running:
                     return
                 _LOGGER.debug(
-                    "WebSocket %s disconnected for %s: %s — retrying in %ds",
+                    "WebSocket %s disconnected for %s: %s — retrying in %ss",
                     name,
                     self._server_name,
                     err,
