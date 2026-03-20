@@ -89,8 +89,12 @@ class UnraidStorageData:
 
     @property
     def boot(self) -> ArrayDisk | None:
-        """Return boot/flash device."""
-        return self.array.boot
+        """Return boot/flash device, falling back to bootDevices[0]."""
+        if self.array.boot is not None:
+            return self.array.boot
+        if self.array.bootDevices:
+            return self.array.bootDevices[0]
+        return None
 
     @property
     def disks(self) -> list[ArrayDisk]:

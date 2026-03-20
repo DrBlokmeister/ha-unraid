@@ -1291,6 +1291,25 @@ async def test_storage_coordinator_parses_boot_device(
     assert data.array.boot.name == "Flash"
 
 
+@pytest.mark.asyncio
+async def test_storage_coordinator_boot_fallback_to_boot_devices(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test storage data boot property falls back to bootDevices when boot is None."""
+    array = make_array(boot=None)
+    array.bootDevices = [make_disk(id="flash", name="Flash", type="FLASH")]
+    mock_api_client.typed_get_array.return_value = array
+
+    coordinator = UnraidStorageCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    data = await coordinator._async_update_data()
+
+    assert data is not None
+    assert data.boot is not None
+    assert data.boot.name == "Flash"
+
+
 # =============================================================================
 # Error Recovery Tests
 # =============================================================================

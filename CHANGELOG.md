@@ -7,6 +7,36 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+No unreleased changes yet.
+## [2026.3.1] - 2026-03-20
+
+### Added
+
+- **WebSocket Real-Time Subscriptions**: Live data streaming via GraphQL WebSocket subscriptions for container stats, array state changes, and UPS updates — replacing polling for these data sources
+  - Container CPU/memory stats pushed in real-time (no 30s poll delay)
+  - Array state changes (start/stop/parity) detected instantly
+  - UPS status updates received immediately
+  - Automatic reconnection with exponential backoff on connection loss
+- **API Version Sensor**: New diagnostic sensor showing the Unraid GraphQL API version (e.g. "4.30.1") — helps users identify if they are running the latest version of the Unraid API
+- **Extended Disk Attributes**: Disk usage sensors now include rotational, transport, format, read/write/error counts, color, and temperature thresholds (warning/critical) from unraid-api v1.7.0
+- **Extended Share Attributes**: Share usage sensors now include cache policy, allocator, split level, floor, COW, color, and LUKS status from unraid-api v1.7.0
+- **Extended Container Attributes**: Container switches now include project URL, support URL, registry URL, auto-start order, and Tailscale status from unraid-api v1.7.0
+- **Container Stats Extra Attributes**: Container CPU sensor now includes block I/O and network I/O as state attributes
+
+### Changed
+
+- **Updated unraid-api to v1.7.0**: New API features including WebSocket subscriptions, direct UPS power readings, extended disk/share/container metadata, and boot device fallback support
+- **Container Resource Sensors Reworked**: Container CPU, memory, and memory percentage sensors now powered by WebSocket real-time data instead of coordinator polling
+- **Container Resource Sensors No Longer Diagnostic**: Container CPU, memory, and memory percentage sensors moved from diagnostic entity category to primary sensors
+- **UPS Power Sensor Enhanced**: Now prefers direct `currentPower` value from the API (v1.7.0+), falling back to calculated value from load percentage × nominal power. The sensor is now available when the API reports power directly, even without user-configured nominal power
+- **UPS Nominal Power Auto-Detection**: UPS energy sensor now automatically detects nominal power from the API (v1.7.0+) when available, removing the need to manually configure it in integration options. User-configured nominal power is still used as a fallback for older API versions
+- **Boot Device Fallback**: Storage coordinator now falls back to `bootDevices[0]` when `array.boot` is `None`, improving compatibility with different Unraid configurations
+
+### Fixed
+
+- **Container Stats Sensor Unique IDs**: Fixed backward-compatible unique ID format for container resource sensors (`container_{name}_{metric}`) to match existing entity registry entries, preventing duplicate/orphaned entities on upgrade
+- **Disk Temperature Attributes**: Temperature thresholds (warning/critical) now included when available from the API
+
 ## [2026.3.0] - 2026-03-01
 
 ### Added

@@ -35,3 +35,12 @@ repos:
       - id: bandit
         args: [-c, pyproject.toml]
         additional_dependencies: ["bandit[toml]"]
+
+  - repo: local
+    hooks:
+      - id: pip-audit
+        name: pip-audit (dependency vulnerability scan)
+        language: system
+        entry: bash -c 'uv export --no-hashes --frozen > /tmp/pre-commit-requirements.txt && pip-audit --disable-pip --no-deps -r /tmp/pre-commit-requirements.txt'
+        files: ^uv\.lock$
+        pass_filenames: false

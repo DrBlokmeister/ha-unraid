@@ -15,6 +15,7 @@ body:
         **Before submitting**, please:
         - Search existing [open](https://github.com/ruaan-deysel/ha-unraid/issues) and [closed](https://github.com/ruaan-deysel/ha-unraid/issues?q=is%3Aissue+is%3Aclosed) issues
         - Check if the feature is available in Unraid's GraphQL API (required for implementation)
+        - Ensure you have the latest GraphQL API — install the [Unraid Connect](https://unraid.net/connect) plugin to stay up to date
         - Consider if this aligns with Home Assistant integration standards
 
   - type: dropdown

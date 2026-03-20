@@ -16,6 +16,7 @@ body:
         - Searched existing [open](https://github.com/ruaan-deysel/ha-unraid/issues) and [closed](https://github.com/ruaan-deysel/ha-unraid/issues?q=is%3Aissue+is%3Aclosed) issues
         - Verified you're running the latest version of the integration
         - Confirmed Unraid 7.2.0 or later (required for GraphQL API)
+        - **Confirmed you have the latest GraphQL API** — install the [Unraid Connect](https://unraid.net/connect) plugin from Community Applications to automatically receive the latest API updates. Many issues are resolved simply by updating to the latest GraphQL API version.
 
   - type: textarea
     id: description
@@ -79,6 +80,17 @@ body:
       placeholder: "7.2.0"
     validations:
       required: true
+
+  - type: input
+    id: graphql_api_version
+    attributes:
+      label: 🔌 GraphQL API Version
+      description: |
+        The version shown by the **API Version** diagnostic sensor (e.g. `sensor.unraid_api_version`).
+        If you don't have this sensor, install the [Unraid Connect](https://unraid.net/connect) plugin to get the latest API.
+      placeholder: "4.30.1"
+    validations:
+      required: false
 
   - type: input
     id: integration_version
@@ -174,6 +186,8 @@ body:
         - label: "I have searched existing [open](https://github.com/ruaan-deysel/ha-unraid/issues) and [closed](https://github.com/ruaan-deysel/ha-unraid/issues?q=is%3Aissue+is%3Aclosed) issues to ensure this isn't a duplicate"
           required: true
         - label: "I am running Unraid 7.2.0 or later (required for GraphQL API)"
+          required: true
+        - label: "I am running the latest GraphQL API (install [Unraid Connect](https://unraid.net/connect) plugin to update automatically)"
           required: true
         - label: "I have reproduced the issue on the latest version to confirm it still exists"
           required: true

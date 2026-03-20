@@ -40,6 +40,7 @@ from .coordinator import (
     UnraidStorageCoordinator,
     UnraidSystemCoordinator,
 )
+from .websocket import UnraidWebSocketManager
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -63,6 +64,7 @@ class UnraidRuntimeData:
     system_coordinator: UnraidSystemCoordinator
     storage_coordinator: UnraidStorageCoordinator
     infra_coordinator: UnraidInfraCoordinator
+    websocket_manager: UnraidWebSocketManager
     server_info: dict
 
 
@@ -200,16 +202,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: UnraidConfigEntry) -> bo
         raise
 
     # Store runtime data in config entry (HA 2024.4+ pattern)
+    websocket_manager = UnraidWebSocketManager(
+        api_client=api_client,
+        system_coordinator=system_coordinator,
+        storage_coordinator=storage_coordinator,
+        server_name=server_name,
+    )
+
     entry.runtime_data = UnraidRuntimeData(
         api_client=api_client,
         system_coordinator=system_coordinator,
         storage_coordinator=storage_coordinator,
         infra_coordinator=infra_coordinator,
+        websocket_manager=websocket_manager,
         server_info=server_info,
     )
 
     # Forward setup to platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Start WebSocket subscriptions after platforms are set up
+    await websocket_manager.async_start()
 
     _LOGGER.info(
         "Unraid integration setup complete for %s",
@@ -225,6 +238,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: UnraidConfigEntry) -> b
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
+        # Stop WebSocket subscriptions
+        await entry.runtime_data.websocket_manager.async_stop()
         # Close API client
         await entry.runtime_data.api_client.close()
         _LOGGER.info("Unraid integration unloaded for entry %s", entry.title)

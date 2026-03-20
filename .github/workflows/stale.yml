@@ -22,6 +22,6 @@ jobs:
           stale-pr-message: 'This PR has been marked as stale due to inactivity. If no further activity occurs, it will be closed in 7 days.'
           days-before-stale: 30 # Number of days before an issue/PR becomes stale
           days-before-close: 7 # Number of days to wait after marking as stale before closing
-          exempt-issue-labels: 'pinned,enhancement' # Do not mark issues with these labels as stale
-          exempt-pr-labels: 'work-in-progress' # Do not mark PRs with these labels as stale
+          exempt-issue-labels: 'pinned,enhancement,confirmed,priority: critical,priority: high'
+          exempt-pr-labels: 'work-in-progress,pinned'
           operations-per-run: 30 # Number of actions to perform per run
