@@ -130,6 +130,17 @@ warn_no_return = true
 module = "tests.*"
 disallow_untyped_defs = false
 
+[tool.uv]
+environments = ["python_full_version >= '3.14.2'"]
+# Override homeassistant's exact pins to fix Dependabot security alerts:
+# - PyJWT CVE (unknown crit header extensions)
+# - pyOpenSSL CVE-2026-27459 (DTLS cookie buffer overflow)
+# - pyOpenSSL CVE-2026-27448 (TLS connection bypass)
+override-dependencies = [
+    "pyjwt>=2.12.1",
+    "pyopenssl>=26.0.0",
+]
+
 [tool.bandit]
 targets = ["custom_components/unraid"]
 exclude_dirs = ["tests"]
