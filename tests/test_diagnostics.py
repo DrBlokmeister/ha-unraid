@@ -18,6 +18,7 @@ class MockRuntimeData:
     api_client: MagicMock
     system_coordinator: MagicMock
     storage_coordinator: MagicMock
+    infra_coordinator: MagicMock
     server_info: dict
 
 
@@ -33,6 +34,7 @@ def mock_coordinator():
     coordinator = MagicMock()
     coordinator.last_update_success = True
     coordinator.last_update_success_time = datetime(2025, 12, 23, 10, 30, 0)
+    coordinator.data = None
     return coordinator
 
 
@@ -47,6 +49,7 @@ def mock_config_entry(mock_coordinator):
         api_client=MagicMock(),
         system_coordinator=mock_coordinator,
         storage_coordinator=mock_coordinator,
+        infra_coordinator=mock_coordinator,
         server_info={
             "uuid": "abc-123-def-456",
             "name": "tower",
@@ -77,6 +80,8 @@ async def test_diagnostics_with_full_data(mock_hass, mock_config_entry):
     assert result["server_info"]["license_type"] == "Pro"
     assert result["system_coordinator"]["last_update_success"] is True
     assert result["storage_coordinator"]["last_update_success"] is True
+    assert result["infra_coordinator"]["last_update_success"] is True
+    assert "entity_counts" in result
 
 
 @pytest.mark.asyncio
@@ -90,6 +95,7 @@ async def test_diagnostics_with_missing_server_info(mock_hass, mock_coordinator)
         api_client=MagicMock(),
         system_coordinator=mock_coordinator,
         storage_coordinator=mock_coordinator,
+        infra_coordinator=mock_coordinator,
         server_info={},  # Empty server info
     )
 
@@ -109,6 +115,7 @@ async def test_diagnostics_with_failed_coordinator(mock_hass):
     failed_coordinator = MagicMock()
     failed_coordinator.last_update_success = False
     failed_coordinator.last_update_success_time = datetime(2025, 12, 23, 10, 25, 0)
+    failed_coordinator.data = None
 
     entry = MagicMock()
     entry.entry_id = "test-entry-123"
@@ -118,6 +125,7 @@ async def test_diagnostics_with_failed_coordinator(mock_hass):
         api_client=MagicMock(),
         system_coordinator=failed_coordinator,
         storage_coordinator=failed_coordinator,
+        infra_coordinator=failed_coordinator,
         server_info={},
     )
 
@@ -125,6 +133,7 @@ async def test_diagnostics_with_failed_coordinator(mock_hass):
 
     assert result["system_coordinator"]["last_update_success"] is False
     assert result["storage_coordinator"]["last_update_success"] is False
+    assert result["infra_coordinator"]["last_update_success"] is False
 
 
 @pytest.mark.asyncio
@@ -138,6 +147,7 @@ async def test_diagnostics_with_empty_server_info(mock_hass, mock_coordinator):
         api_client=MagicMock(),
         system_coordinator=mock_coordinator,
         storage_coordinator=mock_coordinator,
+        infra_coordinator=mock_coordinator,
         server_info={},
     )
 
@@ -158,6 +168,7 @@ async def test_diagnostics_with_partial_server_info(mock_hass, mock_coordinator)
         api_client=MagicMock(),
         system_coordinator=mock_coordinator,
         storage_coordinator=mock_coordinator,
+        infra_coordinator=mock_coordinator,
         server_info={
             "uuid": "test-uuid",
             # Missing other fields
@@ -190,6 +201,8 @@ async def test_diagnostics_does_not_expose_sensitive_data(mock_hass, mock_config
         "title",
         "version",
         "server_info",
+        "entity_counts",
         "system_coordinator",
         "storage_coordinator",
+        "infra_coordinator",
     }

@@ -7,7 +7,13 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+## [2026.3.2] - 2026-03-22
+
+### Fixed
+- Notification Buttons Not Working: Fixed the "Archive all unread notifications" and "Delete all archived notifications" buttons not functioning due to incorrect API method calls. The buttons now correctly call `archive_notification(notification_id)` and `delete_notification(notification_id)` for each relevant notification, allowing users to manage their Unraid notifications directly from Home Assistant.
+- Storage Coordinator Fails with HTTP 400 on Unraid 7.2.4 — GraphQL Schema Mismatch Prevents All Entity Creation: Fixed storage coordinator failing to fetch array/disks/shares data on Unraid 7.2.4 due to a GraphQL schema change that added new required fields. The coordinator now uses the latest `unraid-api 1.7.1` version which includes updated queries and models compatible with Unraid 7.2.4, restoring functionality for users on that Unraid version.
+
+
 ## [2026.3.1] - 2026-03-20
 
 ### Added

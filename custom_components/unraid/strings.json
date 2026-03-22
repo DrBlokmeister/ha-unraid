@@ -354,10 +354,10 @@
         "name": "Array"
       },
       "parity_check": {
-        "name": "Parity Check"
+        "name": "Parity check"
       },
       "disk_spin": {
-        "name": "Disk {name} Spin"
+        "name": "Disk {name} spin"
       },
       "docker_container": {
         "name": "Container {name}"
@@ -368,19 +368,19 @@
     },
     "button": {
       "parity_check_start_correct": {
-        "name": "Parity Check (Correcting)"
+        "name": "Parity check (correcting)"
       },
       "parity_check_pause": {
-        "name": "Pause Parity Check"
+        "name": "Pause parity check"
       },
       "parity_check_resume": {
-        "name": "Resume Parity Check"
+        "name": "Resume parity check"
       },
       "docker_container_restart": {
-        "name": "Restart Container {name}"
+        "name": "Restart container {name}"
       },
       "vm_force_stop": {
-        "name": "Force Stop VM {name}"
+        "name": "Force stop VM {name}"
       },
       "vm_reboot": {
         "name": "Reboot VM {name}"
@@ -395,10 +395,10 @@
         "name": "Reset VM {name}"
       },
       "archive_all_notifications": {
-        "name": "Archive All Notifications"
+        "name": "Archive all notifications"
       },
       "delete_all_archived_notifications": {
-        "name": "Delete All Archived Notifications"
+        "name": "Delete all archived notifications"
       }
     }
   }

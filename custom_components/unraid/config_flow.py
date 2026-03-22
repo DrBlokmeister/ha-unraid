@@ -315,8 +315,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _handle_generic_error(self, err: Exception) -> None:
         """Handle generic errors, mapping to appropriate exception types."""
-        error_str = str(err).lower()
-        if "401" in error_str or "unauthorized" in error_str:
+        if isinstance(err, aiohttp.ClientResponseError) and err.status in (401, 403):
             msg = "Invalid API key or insufficient permissions"
             raise InvalidAuthError(msg) from err
         _LOGGER.exception("Unexpected error during connection test")

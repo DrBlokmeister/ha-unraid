@@ -199,6 +199,15 @@
       },
       "virtual_machine": {
         "default": "mdi:desktop-tower"
+      },
+      "array": {
+        "default": "mdi:harddisk"
+      },
+      "parity_check": {
+        "default": "mdi:shield-sync"
+      },
+      "disk_spin": {
+        "default": "mdi:harddisk"
       }
     },
     "button": {
@@ -210,6 +219,9 @@
       },
       "parity_check_resume": {
         "default": "mdi:play"
+      },
+      "docker_container_restart": {
+        "default": "mdi:restart"
       },
       "vm_force_stop": {
         "default": "mdi:stop"

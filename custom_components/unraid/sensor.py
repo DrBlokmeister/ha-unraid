@@ -1961,7 +1961,7 @@ class FlashUsageSensor(UnraidSensorEntity):
 # to these sensor entities.
 
 
-class ContainerCpuSensor(SensorEntity, UnraidBaseEntity):
+class ContainerCpuSensor(UnraidBaseEntity, SensorEntity):
     """Container CPU usage sensor (WebSocket-powered)."""
 
     _attr_translation_key = "container_cpu"
@@ -2016,7 +2016,7 @@ class ContainerCpuSensor(SensorEntity, UnraidBaseEntity):
         return attrs
 
 
-class ContainerMemoryUsageSensor(SensorEntity, UnraidBaseEntity):
+class ContainerMemoryUsageSensor(UnraidBaseEntity, SensorEntity):
     """Container memory usage sensor (WebSocket-powered)."""
 
     _attr_translation_key = "container_memory_usage"
@@ -2055,7 +2055,7 @@ class ContainerMemoryUsageSensor(SensorEntity, UnraidBaseEntity):
         return stats.memUsage
 
 
-class ContainerMemoryPercentSensor(SensorEntity, UnraidBaseEntity):
+class ContainerMemoryPercentSensor(UnraidBaseEntity, SensorEntity):
     """Container memory percentage sensor (WebSocket-powered)."""
 
     _attr_translation_key = "container_memory_percent"

@@ -271,6 +271,7 @@ class UnraidSystemCoordinator(DataUpdateCoordinator[UnraidSystemData]):
             msg = f"Authentication failed: {err}"
             _LOGGER.error("System data update failed: %s", msg)
             raise ConfigEntryAuthFailed(msg) from err
+        # RuntimeError: catch aiohttp session-closed errors during HA shutdown
         except (UnraidConnectionError, UnraidTimeoutError, RuntimeError) as err:
             self._previously_unavailable = True
             msg = f"Connection error: {err}"
@@ -415,6 +416,7 @@ class UnraidStorageCoordinator(DataUpdateCoordinator[UnraidStorageData]):
             self._previously_unavailable = True
             _LOGGER.error("Storage data update failed: Authentication failed: %s", err)
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
+        # RuntimeError: catch aiohttp session-closed errors during HA shutdown
         except (UnraidConnectionError, UnraidTimeoutError, RuntimeError) as err:
             self._previously_unavailable = True
             raise UpdateFailed(f"Connection error: {err}") from err
@@ -593,6 +595,7 @@ class UnraidInfraCoordinator(DataUpdateCoordinator[UnraidInfraData]):
             msg = f"Authentication failed: {err}"
             _LOGGER.error("Infrastructure data update failed: %s", msg)
             raise ConfigEntryAuthFailed(msg) from err
+        # RuntimeError: catch aiohttp session-closed errors during HA shutdown
         except (UnraidConnectionError, UnraidTimeoutError, RuntimeError) as err:
             self._previously_unavailable = True
             raise UpdateFailed(f"Connection error: {err}") from err
