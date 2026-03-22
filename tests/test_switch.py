@@ -20,9 +20,54 @@ from custom_components.unraid.switch import (
     DockerContainerSwitch,
     ParityCheckSwitch,
     VirtualMachineSwitch,
+    _is_already_state_error,
     async_setup_entry,
 )
 from tests.conftest import make_storage_data, make_system_data
+
+# =============================================================================
+# _is_already_state_error Helper Tests
+# =============================================================================
+
+
+def test_is_already_state_error_detects_already_started() -> None:
+    """Test detection of 'already started' API errors."""
+    err = UnraidAPIError(
+        "GraphQL query failed",
+        errors=[{"message": "(HTTP code 304) container already started"}],
+    )
+    assert _is_already_state_error(err) is True
+
+
+def test_is_already_state_error_detects_already_stopped() -> None:
+    """Test detection of 'already stopped' API errors."""
+    err = UnraidAPIError(
+        "GraphQL query failed",
+        errors=[{"message": "(HTTP code 304) container already stopped"}],
+    )
+    assert _is_already_state_error(err) is True
+
+
+def test_is_already_state_error_detects_already_running() -> None:
+    """Test detection of 'already running' API errors."""
+    err = UnraidAPIError(
+        "GraphQL query failed",
+        errors=[{"message": "(HTTP code 304) vm already running"}],
+    )
+    assert _is_already_state_error(err) is True
+
+
+def test_is_already_state_error_rejects_other_errors() -> None:
+    """Test that genuine errors are not treated as 'already state' errors."""
+    err = UnraidAPIError("Connection failed")
+    assert _is_already_state_error(err) is False
+
+    err = UnraidAPIError("Timeout")
+    assert _is_already_state_error(err) is False
+
+    err = UnraidAPIError("Permission denied")
+    assert _is_already_state_error(err) is False
+
 
 # =============================================================================
 # DockerContainerSwitch Tests
@@ -236,6 +281,7 @@ async def test_container_turn_on_success() -> None:
     coordinator = MagicMock(spec=UnraidSystemCoordinator)
     coordinator.data = make_system_data(containers=[container])
     coordinator.async_start_container = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
 
     switch = DockerContainerSwitch(
         coordinator=coordinator,
@@ -246,6 +292,7 @@ async def test_container_turn_on_success() -> None:
 
     await switch.async_turn_on()
     coordinator.async_start_container.assert_called_once_with("ct:1")
+    coordinator.async_request_refresh.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -275,6 +322,36 @@ async def test_container_turn_on_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_container_turn_on_already_started() -> None:
+    """Test starting an already-running container is handled gracefully."""
+    container = DockerContainer(
+        id="ct:1",
+        name="/web",
+        state="EXITED",
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=[container])
+    coordinator.async_start_container = AsyncMock(
+        side_effect=UnraidAPIError(
+            "GraphQL query failed",
+            errors=[{"message": "(HTTP code 304) container already started"}],
+        )
+    )
+    coordinator.async_request_refresh = AsyncMock()
+
+    switch = DockerContainerSwitch(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        container=container,
+    )
+
+    # Should NOT raise — the container is already in the desired state
+    await switch.async_turn_on()
+    coordinator.async_request_refresh.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_container_turn_off_success() -> None:
     """Test successfully stopping a container."""
     container = DockerContainer(
@@ -285,6 +362,7 @@ async def test_container_turn_off_success() -> None:
     coordinator = MagicMock(spec=UnraidSystemCoordinator)
     coordinator.data = make_system_data(containers=[container])
     coordinator.async_stop_container = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
 
     switch = DockerContainerSwitch(
         coordinator=coordinator,
@@ -295,6 +373,7 @@ async def test_container_turn_off_success() -> None:
 
     await switch.async_turn_off()
     coordinator.async_stop_container.assert_called_once_with("ct:1")
+    coordinator.async_request_refresh.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -319,6 +398,36 @@ async def test_container_turn_off_failure() -> None:
     with pytest.raises(HomeAssistantError) as exc_info:
         await switch.async_turn_off()
     assert exc_info.value.translation_key == "container_stop_failed"
+
+
+@pytest.mark.asyncio
+async def test_container_turn_off_already_stopped() -> None:
+    """Test stopping an already-stopped container is handled gracefully."""
+    container = DockerContainer(
+        id="ct:1",
+        name="/web",
+        state="RUNNING",
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(containers=[container])
+    coordinator.async_stop_container = AsyncMock(
+        side_effect=UnraidAPIError(
+            "GraphQL query failed",
+            errors=[{"message": "(HTTP code 304) container already stopped"}],
+        )
+    )
+    coordinator.async_request_refresh = AsyncMock()
+
+    switch = DockerContainerSwitch(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        container=container,
+    )
+
+    # Should NOT raise — the container is already in the desired state
+    await switch.async_turn_off()
+    coordinator.async_request_refresh.assert_called_once()
 
 
 # =============================================================================
@@ -522,6 +631,7 @@ async def test_vm_turn_on_success() -> None:
     coordinator = MagicMock(spec=UnraidSystemCoordinator)
     coordinator.data = make_system_data(vms=[vm])
     coordinator.async_start_vm = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
 
     switch = VirtualMachineSwitch(
         coordinator=coordinator,
@@ -532,6 +642,7 @@ async def test_vm_turn_on_success() -> None:
 
     await switch.async_turn_on()
     coordinator.async_start_vm.assert_called_once_with("vm:1")
+    coordinator.async_request_refresh.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -561,6 +672,36 @@ async def test_vm_turn_on_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_vm_turn_on_already_running() -> None:
+    """Test starting an already-running VM is handled gracefully."""
+    vm = VmDomain(
+        id="vm:1",
+        name="Ubuntu",
+        state="SHUTOFF",
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(vms=[vm])
+    coordinator.async_start_vm = AsyncMock(
+        side_effect=UnraidAPIError(
+            "GraphQL query failed",
+            errors=[{"message": "(HTTP code 304) vm already running"}],
+        )
+    )
+    coordinator.async_request_refresh = AsyncMock()
+
+    switch = VirtualMachineSwitch(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        vm=vm,
+    )
+
+    # Should NOT raise — the VM is already in the desired state
+    await switch.async_turn_on()
+    coordinator.async_request_refresh.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_vm_turn_off_success() -> None:
     """Test successfully stopping a VM."""
     vm = VmDomain(
@@ -571,6 +712,7 @@ async def test_vm_turn_off_success() -> None:
     coordinator = MagicMock(spec=UnraidSystemCoordinator)
     coordinator.data = make_system_data(vms=[vm])
     coordinator.async_stop_vm = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
 
     switch = VirtualMachineSwitch(
         coordinator=coordinator,
@@ -581,6 +723,7 @@ async def test_vm_turn_off_success() -> None:
 
     await switch.async_turn_off()
     coordinator.async_stop_vm.assert_called_once_with("vm:1")
+    coordinator.async_request_refresh.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -607,6 +750,36 @@ async def test_vm_turn_off_failure() -> None:
     with pytest.raises(HomeAssistantError) as exc_info:
         await switch.async_turn_off()
     assert exc_info.value.translation_key == "vm_stop_failed"
+
+
+@pytest.mark.asyncio
+async def test_vm_turn_off_already_stopped() -> None:
+    """Test stopping an already-stopped VM is handled gracefully."""
+    vm = VmDomain(
+        id="vm:1",
+        name="Ubuntu",
+        state="RUNNING",
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(vms=[vm])
+    coordinator.async_stop_vm = AsyncMock(
+        side_effect=UnraidAPIError(
+            "GraphQL query failed",
+            errors=[{"message": "(HTTP code 304) vm already stopped"}],
+        )
+    )
+    coordinator.async_request_refresh = AsyncMock()
+
+    switch = VirtualMachineSwitch(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        vm=vm,
+    )
+
+    # Should NOT raise — the VM is already in the desired state
+    await switch.async_turn_off()
+    coordinator.async_request_refresh.assert_called_once()
 
 
 # =============================================================================

@@ -193,8 +193,8 @@ class TestContainerStatsSubscription:
         assert manager.container_stats.stats["c1"].cpuPercent == 15.0
 
     @pytest.mark.asyncio
-    async def test_container_stats_pushes_coordinator_update(self) -> None:
-        """Test that receiving stats triggers coordinator data push."""
+    async def test_container_stats_no_coordinator_push(self) -> None:
+        """Test that container stats are stored without pushing to coordinator."""
         stats = _make_container_stats("c1")
 
         async def mock_subscribe() -> Any:
@@ -212,7 +212,8 @@ class TestContainerStatsSubscription:
         manager._running = True
         await manager._handle_container_stats()
 
-        system_coordinator.async_set_updated_data.assert_called()
+        assert "c1" in manager.container_stats.stats
+        system_coordinator.async_set_updated_data.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_container_stats_skips_none_id(self) -> None:
@@ -233,8 +234,8 @@ class TestContainerStatsSubscription:
         assert len(manager.container_stats.stats) == 0
 
     @pytest.mark.asyncio
-    async def test_container_stats_no_push_when_coordinator_data_none(self) -> None:
-        """Test that no push happens when coordinator data is None."""
+    async def test_container_stats_stored_when_coordinator_data_none(self) -> None:
+        """Test that stats are stored even when coordinator data is None."""
         stats = _make_container_stats("c1")
 
         async def mock_subscribe() -> Any:
@@ -252,7 +253,7 @@ class TestContainerStatsSubscription:
         manager._running = True
         await manager._handle_container_stats()
 
-        system_coordinator.async_set_updated_data.assert_not_called()
+        assert "c1" in manager.container_stats.stats
 
 
 # =============================================================================

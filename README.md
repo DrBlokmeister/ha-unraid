@@ -1,8 +1,6 @@
 # Home Assistant Integration for Unraid®
 
 [![HACS Integration][hacsbadge]][hacs]
-[![CI](https://github.com/ruaan-deysel/ha-unraid/actions/workflows/ci.yml/badge.svg)](https://github.com/ruaan-deysel/ha-unraid/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/ruaan-deysel/ha-unraid/graph/badge.svg)](https://codecov.io/gh/ruaan-deysel/ha-unraid)
 [![GitHub Last Commit](https://img.shields.io/github/last-commit/ruaan-deysel/ha-unraid)](https://github.com/ruaan-deysel/ha-unraid/commits/main)
 [![GitHub Release](https://img.shields.io/github/v/release/ruaan-deysel/ha-unraid?sort=semver)](https://github.com/ruaan-deysel/ha-unraid/releases)
 [![GitHub Issues](https://img.shields.io/github/issues/ruaan-deysel/ha-unraid)](https://github.com/ruaan-deysel/ha-unraid/issues)

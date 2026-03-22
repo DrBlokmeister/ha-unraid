@@ -930,6 +930,7 @@ async def test_reauth_flow_updates_ssl_flag_when_cert_changes(
             )
         else:
             mock_api.test_connection = AsyncMock(return_value=True)
+            mock_api.check_compatibility = AsyncMock()
             mock_api.get_version = AsyncMock(
                 return_value={"unraid": "7.2.0", "api": "4.29.2"}
             )

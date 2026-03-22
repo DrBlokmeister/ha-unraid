@@ -162,12 +162,6 @@ class UnraidWebSocketManager:
                 continue
             self.container_stats.stats[stats.id] = stats
 
-            # Push updated data to the system coordinator so entities refresh
-            if self._system_coordinator.data is not None:
-                self._system_coordinator.async_set_updated_data(
-                    self._system_coordinator.data
-                )
-
     async def _handle_array_updates(self) -> None:
         """Process array state subscription and trigger storage refresh."""
         async for update in self._api_client.subscribe_array_updates():

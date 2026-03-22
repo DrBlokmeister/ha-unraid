@@ -31,9 +31,21 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Keywords in Unraid API 304 errors indicating the resource is already
+# in the requested state (e.g. "container already started").
+_ALREADY_STATE_KEYWORDS = frozenset(
+    {"already started", "already stopped", "already running"}
+)
+
 # Switches make API calls (start/stop containers, VMs, array, etc.).
 # Limit to one concurrent call to avoid overloading the Unraid server.
 PARALLEL_UPDATES = 1
+
+
+def _is_already_state_error(err: UnraidAPIError) -> bool:
+    """Check if the API error means the resource is already in the desired state."""
+    err_str = str(err).lower()
+    return any(keyword in err_str for keyword in _ALREADY_STATE_KEYWORDS)
 
 
 class UnraidSwitchEntity(UnraidBaseEntity, SwitchEntity):
@@ -165,15 +177,22 @@ class DockerContainerSwitch(UnraidSwitchEntity):
             await self.coordinator.async_start_container(self._container_id)
             _LOGGER.debug("Started Docker container: %s", self._container_id)
         except UnraidAPIError as err:
-            _LOGGER.error("Failed to start Docker container: %s", err)
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="container_start_failed",
-                translation_placeholders={
-                    "name": self._container_name,
-                    "error": str(err),
-                },
-            ) from err
+            if _is_already_state_error(err):
+                _LOGGER.debug(
+                    "Container %s already running, refreshing state",
+                    self._container_id,
+                )
+            else:
+                _LOGGER.error("Failed to start Docker container: %s", err)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="container_start_failed",
+                    translation_placeholders={
+                        "name": self._container_name,
+                        "error": str(err),
+                    },
+                ) from err
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop container."""
@@ -181,15 +200,22 @@ class DockerContainerSwitch(UnraidSwitchEntity):
             await self.coordinator.async_stop_container(self._container_id)
             _LOGGER.debug("Stopped Docker container: %s", self._container_id)
         except UnraidAPIError as err:
-            _LOGGER.error("Failed to stop Docker container: %s", err)
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="container_stop_failed",
-                translation_placeholders={
-                    "name": self._container_name,
-                    "error": str(err),
-                },
-            ) from err
+            if _is_already_state_error(err):
+                _LOGGER.debug(
+                    "Container %s already stopped, refreshing state",
+                    self._container_id,
+                )
+            else:
+                _LOGGER.error("Failed to stop Docker container: %s", err)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="container_stop_failed",
+                    translation_placeholders={
+                        "name": self._container_name,
+                        "error": str(err),
+                    },
+                ) from err
+        await self.coordinator.async_request_refresh()
 
 
 class VirtualMachineSwitch(UnraidSwitchEntity):
@@ -286,12 +312,19 @@ class VirtualMachineSwitch(UnraidSwitchEntity):
             await self.coordinator.async_start_vm(self._vm_id)
             _LOGGER.debug("Started VM: %s", self._vm_id)
         except UnraidAPIError as err:
-            _LOGGER.error("Failed to start VM: %s", err)
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="vm_start_failed",
-                translation_placeholders={"name": self._vm_name, "error": str(err)},
-            ) from err
+            if _is_already_state_error(err):
+                _LOGGER.debug("VM %s already running, refreshing state", self._vm_id)
+            else:
+                _LOGGER.error("Failed to start VM: %s", err)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="vm_start_failed",
+                    translation_placeholders={
+                        "name": self._vm_name,
+                        "error": str(err),
+                    },
+                ) from err
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop VM."""
@@ -299,12 +332,19 @@ class VirtualMachineSwitch(UnraidSwitchEntity):
             await self.coordinator.async_stop_vm(self._vm_id)
             _LOGGER.debug("Stopped VM: %s", self._vm_id)
         except UnraidAPIError as err:
-            _LOGGER.error("Failed to stop VM: %s", err)
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="vm_stop_failed",
-                translation_placeholders={"name": self._vm_name, "error": str(err)},
-            ) from err
+            if _is_already_state_error(err):
+                _LOGGER.debug("VM %s already stopped, refreshing state", self._vm_id)
+            else:
+                _LOGGER.error("Failed to stop VM: %s", err)
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="vm_stop_failed",
+                    translation_placeholders={
+                        "name": self._vm_name,
+                        "error": str(err),
+                    },
+                ) from err
+        await self.coordinator.async_request_refresh()
 
 
 # =============================================================================

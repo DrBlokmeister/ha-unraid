@@ -68,8 +68,8 @@ async def test_diagnostics_with_full_data(mock_hass, mock_config_entry):
     assert result["entry_id"] == "test-entry-123"
     assert result["title"] == "Unraid Tower"
     assert result["version"] == 1
-    assert result["server_info"]["uuid"] == "abc-123-def-456"
-    assert result["server_info"]["hostname"] == "tower"
+    assert result["server_info"]["uuid"] == "**REDACTED**"
+    assert result["server_info"]["hostname"] == "**REDACTED**"
     assert result["server_info"]["manufacturer"] == "Supermicro"
     assert result["server_info"]["model"] == "X11SSH-F"
     assert result["server_info"]["sw_version"] == "7.2.0"
@@ -166,9 +166,8 @@ async def test_diagnostics_with_partial_server_info(mock_hass, mock_coordinator)
 
     result = await async_get_config_entry_diagnostics(mock_hass, entry)
 
-    assert result["server_info"]["uuid"] == "test-uuid"
+    assert result["server_info"]["uuid"] == "**REDACTED**"
     assert result["server_info"]["hostname"] is None
-    assert result["server_info"]["manufacturer"] is None
     assert result["server_info"]["model"] is None
 
 

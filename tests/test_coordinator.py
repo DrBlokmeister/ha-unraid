@@ -184,6 +184,8 @@ def mock_api_client():
     client.typed_get_vars = AsyncMock(return_value=None)
     client.typed_get_plugins = AsyncMock(return_value=[])
     client.close = AsyncMock()
+    client.archive_all_notifications = AsyncMock(return_value={})
+    client.delete_all_notifications = AsyncMock(return_value={})
     return client
 
 
@@ -814,17 +816,17 @@ async def test_storage_coordinator_http_error_handling(
 
 
 @pytest.mark.asyncio
-async def test_storage_coordinator_unexpected_error_handling(
+async def test_storage_coordinator_runtime_error_handling(
     hass, mock_api_client, mock_config_entry
 ):
-    """Test storage coordinator propagates unexpected errors."""
-    mock_api_client.typed_get_array.side_effect = RuntimeError("Something went wrong")
+    """Test storage coordinator handles RuntimeError as connection error."""
+    mock_api_client.typed_get_array.side_effect = RuntimeError("Session is closed")
 
     coordinator = UnraidStorageCoordinator(
         hass, mock_api_client, "tower", mock_config_entry
     )
 
-    with pytest.raises(RuntimeError, match="Something went wrong"):
+    with pytest.raises(UpdateFailed, match="Connection error"):
         await coordinator._async_update_data()
 
 
@@ -1062,6 +1064,21 @@ async def test_infra_coordinator_connection_recovery(
     data = await coordinator._async_update_data()
     assert data is not None
     assert coordinator._previously_unavailable is False
+
+
+@pytest.mark.asyncio
+async def test_infra_coordinator_runtime_error_handling(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test infra coordinator handles RuntimeError as connection error."""
+    mock_api_client.typed_get_services.side_effect = RuntimeError("Session is closed")
+
+    coordinator = UnraidInfraCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    with pytest.raises(UpdateFailed, match="Connection error"):
+        await coordinator._async_update_data()
 
 
 # =============================================================================
@@ -1572,30 +1589,95 @@ async def test_storage_coordinator_auth_error_triggers_reauth(
 
 
 @pytest.mark.asyncio
-async def test_system_coordinator_unexpected_error_handled(
+async def test_system_coordinator_runtime_error_handled(
     hass, mock_api_client, mock_config_entry
 ):
-    """Test system coordinator propagates unexpected errors."""
-    mock_api_client.get_server_info.side_effect = RuntimeError("Something unexpected")
+    """Test system coordinator handles RuntimeError as connection error."""
+    mock_api_client.get_server_info.side_effect = RuntimeError("Session is closed")
 
     coordinator = UnraidSystemCoordinator(
         hass, mock_api_client, "tower", mock_config_entry
     )
 
-    with pytest.raises(RuntimeError, match="Something unexpected"):
+    with pytest.raises(UpdateFailed, match="Connection error"):
         await coordinator._async_update_data()
 
 
 @pytest.mark.asyncio
-async def test_storage_coordinator_unexpected_error_handled(
+async def test_storage_coordinator_runtime_error_handled(
     hass, mock_api_client, mock_config_entry
 ):
-    """Test storage coordinator propagates unexpected errors."""
-    mock_api_client.typed_get_array.side_effect = RuntimeError("Something unexpected")
+    """Test storage coordinator handles RuntimeError as connection error."""
+    mock_api_client.typed_get_array.side_effect = RuntimeError("Session is closed")
 
     coordinator = UnraidStorageCoordinator(
         hass, mock_api_client, "tower", mock_config_entry
     )
 
-    with pytest.raises(RuntimeError, match="Something unexpected"):
+    with pytest.raises(UpdateFailed, match="Connection error"):
         await coordinator._async_update_data()
+
+
+# =============================================================================
+# Notification Action Method Tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_archive_all_notifications_calls_library(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test archive all notifications delegates to library method."""
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    await coordinator.async_archive_all_notifications()
+
+    mock_api_client.archive_all_notifications.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_all_notifications_calls_library(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test delete all notifications delegates to library method."""
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    await coordinator.async_delete_all_notifications()
+
+    mock_api_client.delete_all_notifications.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_archive_all_notifications_propagates_error(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test archive all notifications propagates API errors."""
+    mock_api_client.archive_all_notifications.side_effect = UnraidAPIError(
+        "Bad Request"
+    )
+
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    with pytest.raises(UnraidAPIError, match="Bad Request"):
+        await coordinator.async_archive_all_notifications()
+
+
+@pytest.mark.asyncio
+async def test_delete_all_notifications_propagates_error(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test delete all notifications propagates API errors."""
+    mock_api_client.delete_all_notifications.side_effect = UnraidAPIError("Bad Request")
+
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    with pytest.raises(UnraidAPIError, match="Bad Request"):
+        await coordinator.async_delete_all_notifications()
