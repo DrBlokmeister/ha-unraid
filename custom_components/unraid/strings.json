@@ -322,6 +322,9 @@
       "docker_total_memory_percent": {
         "name": "Docker total memory %"
       },
+      "docker_total_memory_bytes": {
+        "name": "Docker total memory used"
+      },
       "parity_speed": {
         "name": "Parity check speed"
       },

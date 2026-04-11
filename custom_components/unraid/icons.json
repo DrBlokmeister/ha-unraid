@@ -166,6 +166,9 @@
       "docker_total_memory_percent": {
         "default": "mdi:docker"
       },
+      "docker_total_memory_bytes": {
+        "default": "mdi:docker"
+      },
       "parity_speed": {
         "default": "mdi:speedometer"
       },

@@ -2519,6 +2519,58 @@ class DockerTotalMemoryPercentSensor(UnraidBaseEntity, SensorEntity):
         return {"container_count": len(all_stats)}
 
 
+class DockerTotalMemoryBytesSensor(UnraidBaseEntity, SensorEntity):
+    """Total Docker memory used in bytes (derived from memory % x system RAM)."""
+
+    _attr_translation_key = "docker_total_memory_bytes"
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_native_unit_of_measurement = "B"
+    _attr_suggested_unit_of_measurement = "GiB"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+
+    def __init__(
+        self,
+        coordinator: UnraidSystemCoordinator,
+        server_uuid: str,
+        server_name: str,
+        ws_manager: UnraidWebSocketManager,
+    ) -> None:
+        """Initialize Docker total memory bytes sensor."""
+        self._ws_manager = ws_manager
+        super().__init__(
+            coordinator=coordinator,
+            server_uuid=server_uuid,
+            server_name=server_name,
+            resource_id="docker_total_memory_bytes",
+            name="Docker Total Memory Used",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """
+        Return total Docker memory used in bytes.
+
+        Computed as sum(container memPercent) x system_memory_total / 100.
+        """
+        all_stats = self._ws_manager.container_stats.stats
+        if not all_stats:
+            return None
+        data: UnraidSystemData | None = self.coordinator.data
+        if data is None or data.metrics.memory_total is None:
+            return None
+        total_pct = sum(
+            s.memPercent for s in all_stats.values() if s.memPercent is not None
+        )
+        return int(total_pct * data.metrics.memory_total / 100)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return container count as attribute."""
+        all_stats = self._ws_manager.container_stats.stats
+        return {"container_count": len(all_stats)}
+
+
 # =============================================================================
 # Parity Speed Sensor
 # =============================================================================
@@ -3171,6 +3223,9 @@ async def async_setup_entry(
                 system_coordinator, server_uuid, server_name, ws_manager
             ),
             DockerTotalMemoryPercentSensor(
+                system_coordinator, server_uuid, server_name, ws_manager
+            ),
+            DockerTotalMemoryBytesSensor(
                 system_coordinator, server_uuid, server_name, ws_manager
             ),
         ]
