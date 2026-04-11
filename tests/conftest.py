@@ -30,6 +30,7 @@ from unraid_api.models import (
     Service,
     Share,
     SystemMetrics,
+    TemperatureMetrics,
     UnraidArray,
     UPSDevice,
     Vars,
@@ -107,17 +108,21 @@ def make_system_data(
     memory_percent: float | None = None,
     memory_free: int | None = None,
     memory_available: int | None = None,
+    memory_active: int | None = None,
+    memory_buffcache: int | None = None,
     cpu_temps: list[float] | None = None,
     cpu_power: float | None = None,
     swap_percent: float | None = None,
     swap_total: int | None = None,
     swap_used: int | None = None,
+    swap_free: int | None = None,
     uptime: str | datetime | None = None,  # ISO format string or datetime
     ups_devices: list[UPSDevice] | None = None,
     containers: list[DockerContainer] | None = None,
     vms: list[VmDomain] | None = None,
     notifications_unread: int = 0,
     notification_overview: NotificationOverview | None = None,
+    temperature: TemperatureMetrics | None = None,
 ) -> UnraidSystemData:
     """Create a UnraidSystemData instance for testing."""
     from datetime import datetime
@@ -145,10 +150,14 @@ def make_system_data(
             memory_used=memory_used,
             memory_free=memory_free,
             memory_available=memory_available,
+            memory_active=memory_active,
+            memory_buffcache=memory_buffcache,
             swap_percent=swap_percent,
             swap_total=swap_total,
             swap_used=swap_used,
+            swap_free=swap_free,
             uptime=uptime_dt,
+            temperature=temperature,
         ),
         ups_devices=ups_devices or [],
         containers=containers or [],
@@ -382,6 +391,9 @@ def create_mock_unraid_client(
 
     # Plugins (returns list of Plugin models)
     client.typed_get_plugins = AsyncMock(return_value=plugins or [])
+
+    # Network (returns Network model)
+    client.typed_get_network = AsyncMock(return_value=None)
 
     return client
 

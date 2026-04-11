@@ -93,12 +93,10 @@ def make_docker_container(**kwargs: Any) -> DockerContainer:
 
 def make_vm(**kwargs: Any) -> VmDomain:
     """Create a VmDomain model for testing."""
-    defaults = {
-        "id": "vm-uuid-123",  # VmDomain uses 'id' not 'uuid'
+    defaults: dict[str, Any] = {
+        "id": "vm-uuid-123",
         "name": "windows10",
         "state": "RUNNING",
-        "vcpu": 4,  # VmDomain uses 'vcpu' not 'vcpus'
-        "memory": 8589934592,
     }
     defaults.update(kwargs)
     return VmDomain(**defaults)
@@ -183,6 +181,7 @@ def mock_api_client():
     client.typed_get_remote_access = AsyncMock(return_value=None)
     client.typed_get_vars = AsyncMock(return_value=None)
     client.typed_get_plugins = AsyncMock(return_value=[])
+    client.typed_get_network = AsyncMock(return_value=None)
     client.close = AsyncMock()
     client.archive_all_notifications = AsyncMock(return_value={})
     client.delete_all_notifications = AsyncMock(return_value={})
@@ -362,8 +361,8 @@ async def test_system_coordinator_parses_docker_containers(
 async def test_system_coordinator_parses_vms(hass, mock_api_client, mock_config_entry):
     """Test system coordinator correctly parses VM data."""
     mock_api_client.typed_get_vms.return_value = [
-        make_vm(name="windows10", state="RUNNING", vcpu=4),
-        make_vm(name="ubuntu", state="SHUTOFF", vcpu=2),
+        make_vm(name="windows10", state="RUNNING"),
+        make_vm(name="ubuntu", state="SHUTOFF"),
     ]
 
     coordinator = UnraidSystemCoordinator(
@@ -373,7 +372,7 @@ async def test_system_coordinator_parses_vms(hass, mock_api_client, mock_config_
 
     assert len(data.vms) == 2
     assert data.vms[0].name == "windows10"
-    assert data.vms[0].vcpu == 4
+    assert data.vms[0].state == "RUNNING"
     assert data.vms[1].state == "SHUTOFF"
 
 
@@ -985,6 +984,7 @@ async def test_infra_coordinator_fetch_success(
     mock_api_client.typed_get_remote_access.assert_called_once()
     mock_api_client.typed_get_vars.assert_called_once()
     mock_api_client.typed_get_plugins.assert_called_once()
+    mock_api_client.typed_get_network.assert_called_once()
 
 
 @pytest.mark.asyncio

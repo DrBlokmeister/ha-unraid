@@ -13,7 +13,7 @@
 | **Code path**        | `custom_components/unraid/`                   |
 | **Test path**        | `tests/`                                      |
 | **Python**           | 3.13+                                         |
-| **HA minimum**       | 2026.3.0                                      |
+| **HA minimum**       | 2026.4.1                                      |
 | **Key dependency**   | `unraid-api>=1.6.0`                           |
 | **iot_class**        | `local_polling`                               |
 | **Config flow**      | Yes (UI only, no YAML)                        |

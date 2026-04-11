@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,10 +20,19 @@ from unraid_api.models import (
     ParityHistoryEntry,
     Plugin,
     Registration,
+    SensorType,
     Share,
+    TemperatureMetrics,
+    TemperatureReading,
+    TemperatureSensorSummary,
+    TemperatureStatus,
+    TemperatureSummary,
     UPSBattery,
     UPSDevice,
     UPSPower,
+)
+from unraid_api.models import (
+    TemperatureSensor as TemperatureSensorModel,
 )
 
 from custom_components.unraid.const import DOMAIN
@@ -42,6 +52,8 @@ from custom_components.unraid.sensor import (
     DiskErrorCountSensor,
     DiskTemperatureSensor,
     DiskUsageSensor,
+    DockerTotalCpuSensor,
+    DockerTotalMemoryPercentSensor,
     FlashUsageSensor,
     InstalledPluginsSensor,
     LastParityCheckDateSensor,
@@ -54,14 +66,19 @@ from custom_components.unraid.sensor import (
     ParityEstimatedSensor,
     ParityProgressSensor,
     ParitySpeedSensor,
+    RAMActiveSensor,
+    RAMBuffCacheSensor,
     RAMUsageSensor,
     RAMUsedSensor,
     RegistrationExpirationSensor,
     RegistrationStateSensor,
     RegistrationTypeSensor,
     ShareUsageSensor,
+    SwapFreeSensor,
     SwapUsageSensor,
     SwapUsedSensor,
+    SystemTemperatureSensor,
+    TemperatureAverageSensor,
     TemperatureSensor,
     UnraidSensorEntity,
     UnraidVersionSensor,
@@ -77,6 +94,7 @@ from custom_components.unraid.sensor import (
     UptimeSensor,
     _compute_disk_usage_percent,
     _compute_disk_used_bytes,
+    _is_valid_system_temp_sensor,
     format_bytes,
 )
 from tests.conftest import make_infra_data, make_storage_data, make_system_data
@@ -3616,6 +3634,52 @@ def test_flashusagesensor_attributes() -> None:
     assert attrs["status"] == "DISK_OK"
 
 
+def test_flashusagesensor_available_with_boot() -> None:
+    """Test flash usage sensor is available when boot data exists."""
+    boot = ArrayDisk(id="boot", name="Flash", fsSize=16000, fsUsed=8000, fsFree=8000)
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(boot=boot)
+    coordinator.last_update_success = True
+
+    sensor = FlashUsageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.available is True
+
+
+def test_flashusagesensor_unavailable_without_boot() -> None:
+    """Test flash usage sensor is unavailable when boot data is missing."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = make_storage_data(boot=None)
+    coordinator.last_update_success = True
+
+    sensor = FlashUsageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.available is False
+
+
+def test_flashusagesensor_unavailable_none_data() -> None:
+    """Test flash usage sensor is unavailable when coordinator data is None."""
+    coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    coordinator.data = None
+    coordinator.last_update_success = True
+
+    sensor = FlashUsageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.available is False
+
+
 # =============================================================================
 # async_setup_entry Tests
 # =============================================================================
@@ -3860,6 +3924,49 @@ async def test_asyncsetupentry_creates_flash_sensor(hass) -> None:
 
     entity_types = {type(e).__name__ for e in added_entities}
     assert "FlashUsageSensor" in entity_types
+
+
+@pytest.mark.asyncio
+async def test_asyncsetupentry_creates_flash_sensor_without_boot(hass) -> None:
+    """Test setup still creates flash sensor when boot device is None (#208)."""
+    from custom_components.unraid import UnraidRuntimeData
+    from custom_components.unraid.sensor import async_setup_entry
+
+    system_coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    system_coordinator.data = make_system_data()
+
+    storage_coordinator = MagicMock(spec=UnraidStorageCoordinator)
+    storage_coordinator.data = make_storage_data(boot=None)
+
+    mock_entry = MagicMock()
+    mock_entry.data = {"host": "192.168.1.100"}
+    mock_entry.options = {}
+    mock_entry.runtime_data = UnraidRuntimeData(
+        api_client=MagicMock(),
+        system_coordinator=system_coordinator,
+        storage_coordinator=storage_coordinator,
+        infra_coordinator=MagicMock(),
+        server_info={"uuid": "test-uuid", "name": "tower"},
+        websocket_manager=MagicMock(),
+    )
+
+    added_entities = []
+
+    def mock_add_entities(entities) -> None:
+        added_entities.extend(entities)
+
+    await async_setup_entry(hass, mock_entry, mock_add_entities)
+
+    entity_types = {type(e).__name__ for e in added_entities}
+    assert "FlashUsageSensor" in entity_types
+
+    # Verify it's unavailable without boot data
+    flash_sensors = [
+        e for e in added_entities if type(e).__name__ == "FlashUsageSensor"
+    ]
+    assert len(flash_sensors) == 1
+    flash = flash_sensors[0]
+    assert flash.native_value is None
 
 
 @pytest.mark.asyncio
@@ -4981,7 +5088,7 @@ def test_parityspeedsensor_creation() -> None:
     """Test parity speed sensor creation."""
     coordinator = MagicMock(spec=UnraidStorageCoordinator)
     coordinator.data = make_storage_data(
-        parity_status=ParityCheck(speed=104857600, progress=50.0)
+        parity_status=ParityCheck(speed="104857600", progress=50.0)
     )
 
     sensor = ParitySpeedSensor(
@@ -5002,7 +5109,7 @@ def test_parityspeedsensor_state() -> None:
     """Test parity speed sensor returns speed in MiB/s."""
     coordinator = MagicMock(spec=UnraidStorageCoordinator)
     # 100 MiB/s = 104857600 bytes/s
-    coordinator.data = make_storage_data(parity_status=ParityCheck(speed=104857600))
+    coordinator.data = make_storage_data(parity_status=ParityCheck(speed="104857600"))
 
     sensor = ParitySpeedSensor(
         coordinator=coordinator,
@@ -5018,7 +5125,7 @@ def test_parityspeedsensor_attributes() -> None:
     coordinator = MagicMock(spec=UnraidStorageCoordinator)
     coordinator.data = make_storage_data(
         parity_status=ParityCheck(
-            speed=52428800, elapsed=3600, estimated=7200, progress=50.0
+            speed="52428800", elapsed=3600, estimated=7200, progress=50.0
         )
     )
 
@@ -5904,3 +6011,747 @@ def test_disk_error_count_sensor_cache_disk() -> None:
         disk=disk,
     )
     assert sensor.native_value == 1
+
+
+# =============================================================================
+# Docker Aggregate Sensor Tests
+# =============================================================================
+
+
+def _make_ws_manager(**kwargs: Any) -> Any:
+    """Create a mock WebSocket manager with container stats."""
+    from unittest.mock import MagicMock
+
+    from unraid_api.models import DockerContainerStats
+
+    from custom_components.unraid.websocket import ContainerStatsSnapshot
+
+    ws = MagicMock()
+    stats = kwargs.get("stats", {})
+    snapshot = ContainerStatsSnapshot()
+    for cid, s in stats.items():
+        snapshot.stats[cid] = DockerContainerStats(**s)
+    ws.container_stats = snapshot
+    return ws
+
+
+def test_docker_total_cpu_sensor_init() -> None:
+    """Test DockerTotalCpuSensor initialization."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager()
+    sensor = DockerTotalCpuSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor._attr_translation_key == "docker_total_cpu"
+    assert sensor._attr_native_unit_of_measurement == "%"
+    assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+    assert sensor.unique_id == "test-uuid_docker_total_cpu"
+
+
+def test_docker_total_cpu_sensor_value() -> None:
+    """Test DockerTotalCpuSensor sums container CPU usage."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager(
+        stats={
+            "c1": {"id": "c1", "cpuPercent": 25.5},
+            "c2": {"id": "c2", "cpuPercent": 10.3},
+            "c3": {"id": "c3", "cpuPercent": 5.0},
+        }
+    )
+    sensor = DockerTotalCpuSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor.native_value == 40.8
+
+
+def test_docker_total_cpu_sensor_empty_stats() -> None:
+    """Test DockerTotalCpuSensor returns None when no stats."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager()
+    sensor = DockerTotalCpuSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor.native_value is None
+
+
+def test_docker_total_cpu_sensor_some_none() -> None:
+    """Test DockerTotalCpuSensor skips containers with None cpuPercent."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager(
+        stats={
+            "c1": {"id": "c1", "cpuPercent": 10.0},
+            "c2": {"id": "c2", "cpuPercent": None},
+        }
+    )
+    sensor = DockerTotalCpuSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor.native_value == 10.0
+
+
+def test_docker_total_cpu_sensor_extra_attributes() -> None:
+    """Test DockerTotalCpuSensor extra attributes include container count."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager(
+        stats={
+            "c1": {"id": "c1", "cpuPercent": 5.0},
+            "c2": {"id": "c2", "cpuPercent": 3.0},
+        }
+    )
+    sensor = DockerTotalCpuSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    attrs = sensor.extra_state_attributes
+    assert attrs["container_count"] == 2
+
+
+def test_docker_total_memory_percent_sensor_init() -> None:
+    """Test DockerTotalMemoryPercentSensor initialization."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager()
+    sensor = DockerTotalMemoryPercentSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor._attr_translation_key == "docker_total_memory_percent"
+    assert sensor._attr_native_unit_of_measurement == "%"
+    assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+    assert sensor.unique_id == "test-uuid_docker_total_memory_pct"
+
+
+def test_docker_total_memory_percent_sensor_value() -> None:
+    """Test DockerTotalMemoryPercentSensor sums container memory percentages."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager(
+        stats={
+            "c1": {"id": "c1", "memPercent": 15.2},
+            "c2": {"id": "c2", "memPercent": 8.5},
+            "c3": {"id": "c3", "memPercent": 3.1},
+        }
+    )
+    sensor = DockerTotalMemoryPercentSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor.native_value == 26.8
+
+
+def test_docker_total_memory_percent_sensor_empty_stats() -> None:
+    """Test DockerTotalMemoryPercentSensor returns None when no stats."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager()
+    sensor = DockerTotalMemoryPercentSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor.native_value is None
+
+
+def test_docker_total_memory_percent_sensor_some_none() -> None:
+    """Test DockerTotalMemoryPercentSensor skips containers with None memPercent."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager(
+        stats={
+            "c1": {"id": "c1", "memPercent": 12.0},
+            "c2": {"id": "c2", "memPercent": None},
+        }
+    )
+    sensor = DockerTotalMemoryPercentSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    assert sensor.native_value == 12.0
+
+
+def test_docker_total_memory_percent_sensor_extra_attributes() -> None:
+    """Test DockerTotalMemoryPercentSensor extra attributes include container count."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    ws = _make_ws_manager(
+        stats={
+            "c1": {"id": "c1", "memPercent": 5.0},
+            "c2": {"id": "c2", "memPercent": 3.0},
+            "c3": {"id": "c3", "memPercent": 2.0},
+        }
+    )
+    sensor = DockerTotalMemoryPercentSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="tower",
+        ws_manager=ws,
+    )
+    attrs = sensor.extra_state_attributes
+    assert attrs["container_count"] == 3
+
+
+# =============================================================================
+# RAM Buffer/Cache Sensor Tests
+# =============================================================================
+
+
+def test_rambuffcachesensor_creation() -> None:
+    """Test RAM buffer/cache sensor is created with correct attributes."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(memory_buffcache=2000000000)
+
+    sensor = RAMBuffCacheSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.unique_id == "test-uuid_ram_buffcache"
+    assert sensor.device_class == SensorDeviceClass.DATA_SIZE
+    assert sensor.native_unit_of_measurement == "B"
+    assert sensor.suggested_unit_of_measurement == "GiB"
+    assert sensor.state_class == SensorStateClass.MEASUREMENT
+    assert sensor.entity_registry_enabled_default is False
+
+
+def test_rambuffcachesensor_state() -> None:
+    """Test RAM buffer/cache sensor returns correct bytes value."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(memory_buffcache=3221225472)
+
+    sensor = RAMBuffCacheSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value == 3221225472
+
+
+def test_rambuffcachesensor_none_data() -> None:
+    """Test RAM buffer/cache sensor returns None when coordinator data is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = RAMBuffCacheSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+def test_rambuffcachesensor_none_value() -> None:
+    """Test RAM buffer/cache sensor returns None when buffcache is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(memory_buffcache=None)
+
+    sensor = RAMBuffCacheSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+# =============================================================================
+# RAM Active Sensor Tests
+# =============================================================================
+
+
+def test_ramactivesensor_creation() -> None:
+    """Test RAM active sensor is created with correct attributes."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(memory_active=4000000000)
+
+    sensor = RAMActiveSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.unique_id == "test-uuid_ram_active"
+    assert sensor.device_class == SensorDeviceClass.DATA_SIZE
+    assert sensor.native_unit_of_measurement == "B"
+    assert sensor.suggested_unit_of_measurement == "GiB"
+    assert sensor.state_class == SensorStateClass.MEASUREMENT
+    assert sensor.entity_registry_enabled_default is False
+
+
+def test_ramactivesensor_state() -> None:
+    """Test RAM active sensor returns correct bytes value."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(memory_active=2147483648)
+
+    sensor = RAMActiveSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value == 2147483648
+
+
+def test_ramactivesensor_none_data() -> None:
+    """Test RAM active sensor returns None when coordinator data is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = RAMActiveSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+# =============================================================================
+# Swap Free Sensor Tests
+# =============================================================================
+
+
+def test_swapfreesensor_creation() -> None:
+    """Test swap free sensor is created with correct attributes."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(swap_free=1000000000)
+
+    sensor = SwapFreeSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.unique_id == "test-uuid_swap_free"
+    assert sensor.device_class == SensorDeviceClass.DATA_SIZE
+    assert sensor.native_unit_of_measurement == "B"
+    assert sensor.suggested_unit_of_measurement == "GiB"
+    assert sensor.state_class == SensorStateClass.MEASUREMENT
+    assert sensor.entity_registry_enabled_default is False
+
+
+def test_swapfreesensor_state() -> None:
+    """Test swap free sensor returns correct bytes value."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(swap_free=4294967296)
+
+    sensor = SwapFreeSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value == 4294967296
+
+
+def test_swapfreesensor_none_data() -> None:
+    """Test swap free sensor returns None when coordinator data is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = SwapFreeSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+# =============================================================================
+# System Temperature Sensor Tests
+# =============================================================================
+
+
+def _make_temp_sensor(
+    sensor_id: str = "mb_temp1",
+    name: str = "Motherboard Temp",
+    sensor_type: SensorType | str | None = SensorType.MOTHERBOARD,
+    location: str | None = "Socket 0",
+    temperature: float = 42.0,
+    warning: float | None = 85.0,
+    critical: float | None = 95.0,
+    status: TemperatureStatus = TemperatureStatus.NORMAL,
+) -> TemperatureSensorModel:
+    """Create a TemperatureSensor model for testing."""
+    return TemperatureSensorModel(
+        id=sensor_id,
+        name=name,
+        type=sensor_type,
+        location=location,
+        current=TemperatureReading(value=temperature, unit="CELSIUS", status=status),
+        min=TemperatureReading(value=35.0, unit="CELSIUS"),
+        max=TemperatureReading(value=55.0, unit="CELSIUS"),
+        warning=warning,
+        critical=critical,
+        history=[],
+    )
+
+
+def _make_temp_metrics(
+    sensors: list[TemperatureSensorModel] | None = None,
+    average: float | None = 45.0,
+    warning_count: int | None = 0,
+    critical_count: int | None = 0,
+) -> TemperatureMetrics:
+    """Create a TemperatureMetrics model for testing."""
+    if sensors is None:
+        sensors = [_make_temp_sensor()]
+    return TemperatureMetrics(
+        id="temp_metrics",
+        summary=TemperatureSummary(
+            average=average,
+            warningCount=warning_count,
+            criticalCount=critical_count,
+            hottest=TemperatureSensorSummary(
+                name=sensors[0].name if sensors else None,
+                current=TemperatureReading(value=55.0, unit="CELSIUS"),
+            )
+            if sensors
+            else None,
+            coolest=TemperatureSensorSummary(
+                name=sensors[-1].name if sensors else None,
+                current=TemperatureReading(value=35.0, unit="CELSIUS"),
+            )
+            if sensors
+            else None,
+        ),
+        sensors=sensors,
+    )
+
+
+def test_systemtemperaturesensor_creation() -> None:
+    """Test system temperature sensor is created with correct attributes."""
+    temp_sensor = _make_temp_sensor()
+    temp_metrics = _make_temp_metrics(sensors=[temp_sensor])
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    assert sensor.unique_id == "test-uuid_temp_mb_temp1"
+    assert sensor.device_class == SensorDeviceClass.TEMPERATURE
+    assert sensor.native_unit_of_measurement == "°C"
+    assert sensor.state_class == SensorStateClass.MEASUREMENT
+
+
+def test_systemtemperaturesensor_value() -> None:
+    """Test system temperature sensor returns correct temperature."""
+    temp_sensor = _make_temp_sensor(temperature=52.5)
+    temp_metrics = _make_temp_metrics(sensors=[temp_sensor])
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    assert sensor.native_value == 52.5
+
+
+def test_systemtemperaturesensor_none_data() -> None:
+    """Test system temperature sensor returns None when coordinator data is None."""
+    temp_sensor = _make_temp_sensor()
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    assert sensor.native_value is None
+
+
+def test_systemtemperaturesensor_none_temperature() -> None:
+    """Test system temperature sensor returns None when temperature metrics absent."""
+    temp_sensor = _make_temp_sensor()
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=None)
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    assert sensor.native_value is None
+
+
+def test_systemtemperaturesensor_sensor_not_found() -> None:
+    """Test system temperature sensor returns None when sensor removed from data."""
+    temp_sensor = _make_temp_sensor(sensor_id="removed_sensor")
+    other_sensor = _make_temp_sensor(sensor_id="different_sensor")
+    temp_metrics = _make_temp_metrics(sensors=[other_sensor])
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    assert sensor.native_value is None
+
+
+def test_systemtemperaturesensor_extra_attributes() -> None:
+    """Test system temperature sensor returns correct extra state attributes."""
+    temp_sensor = _make_temp_sensor(
+        sensor_type=SensorType.CHIPSET,
+        location="PCH",
+        warning=80.0,
+        critical=100.0,
+        status=TemperatureStatus.NORMAL,
+    )
+    temp_metrics = _make_temp_metrics(sensors=[temp_sensor])
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    attrs = sensor.extra_state_attributes
+    assert attrs["sensor_type"] == "CHIPSET"
+    assert attrs["location"] == "PCH"
+    assert attrs["warning_threshold"] == 80.0
+    assert attrs["critical_threshold"] == 100.0
+    assert attrs["status"] == "NORMAL"
+    assert attrs["min_recorded"] == 35.0
+    assert attrs["max_recorded"] == 55.0
+
+
+def test_systemtemperaturesensor_extra_attributes_none() -> None:
+    """Test system temperature sensor returns empty dict when data is None."""
+    temp_sensor = _make_temp_sensor()
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = SystemTemperatureSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+        sensor=temp_sensor,
+    )
+
+    assert sensor.extra_state_attributes == {}
+
+
+def test_systemtemperaturesensor_translation_key() -> None:
+    """Test system temperature sensor translation key matches sensor type."""
+    for stype in [
+        SensorType.MOTHERBOARD,
+        SensorType.CHIPSET,
+        SensorType.AMBIENT,
+        SensorType.GPU,
+        SensorType.VRM,
+    ]:
+        temp_sensor = _make_temp_sensor(sensor_type=stype)
+        coordinator = MagicMock(spec=UnraidSystemCoordinator)
+        coordinator.data = make_system_data()
+
+        sensor = SystemTemperatureSensor(
+            coordinator=coordinator,
+            server_uuid="test-uuid",
+            server_name="test-server",
+            sensor=temp_sensor,
+        )
+
+        expected_key = f"temperature_{str(stype).lower()}"
+        assert sensor.translation_key == expected_key
+
+
+# =============================================================================
+# Temperature Average Sensor Tests
+# =============================================================================
+
+
+def test_temperatureaveragesensor_creation() -> None:
+    """Test temperature average sensor is created with correct attributes."""
+    temp_metrics = _make_temp_metrics(average=48.5)
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.unique_id == "test-uuid_temperature_average"
+    assert sensor.device_class == SensorDeviceClass.TEMPERATURE
+    assert sensor.native_unit_of_measurement == "°C"
+    assert sensor.state_class == SensorStateClass.MEASUREMENT
+
+
+def test_temperatureaveragesensor_value() -> None:
+    """Test temperature average sensor computes average from valid sensors."""
+    sensors = [
+        _make_temp_sensor(sensor_id="s1", temperature=50.0),
+        _make_temp_sensor(sensor_id="s2", temperature=54.6),
+    ]
+    temp_metrics = _make_temp_metrics(sensors=sensors, average=530830.3)
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value == 52.3
+
+
+def test_temperatureaveragesensor_none_data() -> None:
+    """Test temperature average sensor returns None when coordinator data is None."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+def test_temperatureaveragesensor_none_temperature() -> None:
+    """Test temperature average sensor returns None when no temperature data."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=None)
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value is None
+
+
+def test_temperatureaveragesensor_none_summary() -> None:
+    """Test temperature average sensor does not require summary when sensors exist."""
+    sensors = [_make_temp_sensor(sensor_id="s1", temperature=47.0)]
+    temp_metrics = TemperatureMetrics(id="temp", summary=None, sensors=sensors)
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.native_value == 47.0
+
+
+def test_is_valid_system_temp_sensor_rejects_auxtin_and_in_channels() -> None:
+    """Test bogus motherboard AUXTIN/inX channels are filtered out."""
+    assert (
+        _is_valid_system_temp_sensor(
+            _make_temp_sensor(name="nct6793-isa-0290 AUXTIN0", temperature=36.0)
+        )
+        is False
+    )
+    assert (
+        _is_valid_system_temp_sensor(
+            _make_temp_sensor(name="nct6793-isa-0290 in7", temperature=3.4)
+        )
+        is False
+    )
+
+
+def test_is_valid_system_temp_sensor_rejects_out_of_range_temps() -> None:
+    """Test extreme/near-zero values are filtered."""
+    assert (
+        _is_valid_system_temp_sensor(
+            _make_temp_sensor(name="SYSTIN", temperature=115.0)
+        )
+        is False
+    )
+    assert (
+        _is_valid_system_temp_sensor(_make_temp_sensor(name="in5", temperature=0.1))
+        is False
+    )
+
+
+def test_temperatureaveragesensor_extra_attributes() -> None:
+    """Test temperature average sensor returns correct extra attributes."""
+    sensors = [
+        _make_temp_sensor(
+            sensor_id="s1",
+            name="Sensor 1",
+            temperature=55.0,
+            status=TemperatureStatus.WARNING,
+        ),
+        _make_temp_sensor(sensor_id="s2", name="Sensor 2", temperature=42.0),
+        _make_temp_sensor(sensor_id="s3", name="Sensor 3", temperature=35.0),
+    ]
+    temp_metrics = _make_temp_metrics(
+        sensors=sensors, warning_count=1, critical_count=0
+    )
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = make_system_data(temperature=temp_metrics)
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    attrs = sensor.extra_state_attributes
+    assert attrs["sensor_count"] == 3
+    assert attrs["warning_count"] == 1
+    assert attrs["critical_count"] == 0
+    assert attrs["hottest_sensor"] == "Sensor 1"
+    assert attrs["coolest_sensor"] == "Sensor 3"
+
+
+def test_temperatureaveragesensor_extra_attributes_none() -> None:
+    """Test temperature average sensor returns empty dict when no data."""
+    coordinator = MagicMock(spec=UnraidSystemCoordinator)
+    coordinator.data = None
+
+    sensor = TemperatureAverageSensor(
+        coordinator=coordinator,
+        server_uuid="test-uuid",
+        server_name="test-server",
+    )
+
+    assert sensor.extra_state_attributes == {}

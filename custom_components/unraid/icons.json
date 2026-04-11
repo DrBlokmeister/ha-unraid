@@ -16,7 +16,49 @@
       "swap_used": {
         "default": "mdi:swap-horizontal"
       },
+      "ram_buffcache": {
+        "default": "mdi:memory"
+      },
+      "ram_active": {
+        "default": "mdi:memory"
+      },
+      "swap_free": {
+        "default": "mdi:swap-horizontal"
+      },
       "cpu_temperature": {
+        "default": "mdi:thermometer"
+      },
+      "temperature_average": {
+        "default": "mdi:thermometer-lines"
+      },
+      "temperature_cpu_package": {
+        "default": "mdi:thermometer"
+      },
+      "temperature_cpu_core": {
+        "default": "mdi:thermometer"
+      },
+      "temperature_motherboard": {
+        "default": "mdi:expansion-card"
+      },
+      "temperature_chipset": {
+        "default": "mdi:chip"
+      },
+      "temperature_gpu": {
+        "default": "mdi:expansion-card-variant"
+      },
+      "temperature_disk": {
+        "default": "mdi:thermometer"
+      },
+      "temperature_nvme": {
+        "default": "mdi:thermometer"
+      },
+      "temperature_ambient": {
+        "default": "mdi:thermometer-low"
+      },
+      "temperature_vrm": {
+        "default": "mdi:thermometer-high"
+      },
+      "temperature_custom": {
         "default": "mdi:thermometer"
       },
       "cpu_power": {
@@ -106,6 +148,9 @@
       "installed_plugins": {
         "default": "mdi:puzzle"
       },
+      "network_access": {
+        "default": "mdi:lan"
+      },
       "container_cpu": {
         "default": "mdi:docker"
       },
@@ -113,6 +158,12 @@
         "default": "mdi:docker"
       },
       "container_memory_percent": {
+        "default": "mdi:docker"
+      },
+      "docker_total_cpu": {
+        "default": "mdi:docker"
+      },
+      "docker_total_memory_percent": {
         "default": "mdi:docker"
       },
       "parity_speed": {

@@ -87,6 +87,9 @@ INFRA_POLL_INTERVAL: Final = 900  # seconds (15 minutes) - services, registratio
 WS_INITIAL_RETRY_DELAY: Final = 5  # seconds
 WS_MAX_RETRY_DELAY: Final = 300  # seconds (5 minutes)
 WS_RETRY_BACKOFF_FACTOR: Final = 2.0
+# Leading-edge debounce: first WS event triggers refresh, subsequent events
+# within this window are suppressed to prevent refresh storms.
+WS_REFRESH_DEBOUNCE_SECONDS: Final = 10  # seconds
 
 
 # =============================================================================

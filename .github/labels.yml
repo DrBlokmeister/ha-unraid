@@ -1,6 +1,6 @@
 # =============================================================================
 # GitHub Labels Configuration
-# Synced by .github/workflows/labels.yml using crazy-max/ghaction-github-labeler
+# Synced by .github/workflows/labels.yml using native GitHub Actions + API
 # =============================================================================
 
 # --- Type labels ---

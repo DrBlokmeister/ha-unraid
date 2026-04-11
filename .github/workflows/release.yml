@@ -9,16 +9,17 @@ name: Release
     paths:
       - custom_components/unraid/manifest.json
     tags:
-      - 'v*'
+      - "v*"
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   auto_tag:
     name: Tag release on manifest change
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/heads/')
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -84,6 +85,8 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
@@ -241,17 +244,23 @@ jobs:
           cat build/RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
-        with:
-          name: v${{ steps.version.outputs.version }}
-          body_path: build/RELEASE_NOTES.md
-          files: |
-            build/unraid-${{ steps.version.outputs.version }}.zip
-            build/SHA256SUM
-            CHANGELOG.md
-          prerelease: ${{ steps.version.outputs.prerelease }}
-          draft: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          PRE_FLAG=""
+
+          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+            PRE_FLAG="--prerelease"
+          fi
+
+          gh release create "$TAG" \
+            build/unraid-${{ steps.version.outputs.version }}.zip \
+            build/SHA256SUM \
+            CHANGELOG.md \
+            --title "$TAG" \
+            --notes-file build/RELEASE_NOTES.md \
+            $PRE_FLAG
 
       - name: Release Summary
         run: |

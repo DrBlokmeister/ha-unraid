@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "homeassistant>=2026.3.0",
+    "homeassistant>=2026.4.1",
     "aiohttp>=3.9.0",
     "pydantic>=2.0.0",
     "unraid-api>=1.7.1",
@@ -35,7 +35,7 @@ dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=7.0.0",
-    "pytest-homeassistant-custom-component>=0.13.316",
+    "pytest-homeassistant-custom-component>=0.13.322",
     "pytest-timeout>=2.4.0",
     "syrupy>=5.0.0",
 
@@ -136,9 +136,14 @@ environments = ["python_full_version >= '3.14.2'"]
 # - PyJWT CVE (unknown crit header extensions)
 # - pyOpenSSL CVE-2026-27459 (DTLS cookie buffer overflow)
 # - pyOpenSSL CVE-2026-27448 (TLS connection bypass)
+# - cryptography GHSA-m959-cc7f-wv43 (incomplete DNS name constraint)
+# - cryptography GHSA-p423-j2cm-9vmq (buffer overflow non-contiguous buffers)
+# - uv GHSA-pjjw-68hj-v9mw (arbitrary file deletion through RECORD entries)
 override-dependencies = [
     "pyjwt>=2.12.1",
     "pyopenssl>=26.0.0",
+    "cryptography>=46.0.7",
+    "uv>=0.11.6",
 ]
 
 [tool.bandit]

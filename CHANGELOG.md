@@ -7,12 +7,30 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ## [Unreleased]
 
+## [2026.4.0] - 2026-04-11
+
+### Added
+
+- **Network Access Sensor**: New diagnostic sensor (`sensor.{name}_network_access`) showing the primary LAN access URL with all access URLs (LAN/WAN, IPv4/IPv6) as extra attributes — powered by the new `Network` model from unraid-api v1.9.0
+- **Notification WebSocket Subscription**: Real-time notification push via `subscribe_notification_added` — new notifications trigger an immediate system coordinator refresh instead of waiting for the 30-second poll cycle
+- **Parity History WebSocket Subscription**: Live parity check progress updates via `subscribe_parity_history` — parity status changes trigger an immediate storage coordinator refresh instead of waiting for the 5-minute poll cycle
+
+### Changed
+
+- **Updated unraid-api to v1.9.0**: Includes improved temperature filtering (bogus sensor removal in the library's `TemperatureMetrics` model validator), `ParityCheck.speed` type change from `int` to `str`, new `Network`/`AccessUrl` models, new WebSocket subscriptions for notifications and parity history, and capability detection for subscription gating
+- **Parity Speed Sensor Updated**: Adapted to handle `ParityCheck.speed` being a string value (changed from `int` in unraid-api v1.9.0) — the sensor now safely converts the string to float before calculating MiB/s
+
+### Fixed
+
+- **Parity Speed Sensor Type Error**: Fixed `TypeError` that would occur when `ParityCheck.speed` returned as a string (breaking change in unraid-api v1.9.0) — the sensor now handles both string and `None` values gracefully
+- **Flash Device Usage Sensor Availability**: Sensor now reports **Unavailable** instead of **Unknown** when the Unraid server does not return boot/flash device data (`array.boot = null`). This is a server-side data gap on some Unraid versions — the entity will automatically recover and show usage data once the server starts returning flash filesystem information
+
 ## [2026.3.2] - 2026-03-22
 
 ### Fixed
-- Notification Buttons Not Working: Fixed the "Archive all unread notifications" and "Delete all archived notifications" buttons not functioning due to incorrect API method calls. The buttons now correctly call `archive_notification(notification_id)` and `delete_notification(notification_id)` for each relevant notification, allowing users to manage their Unraid notifications directly from Home Assistant.
-- Storage Coordinator Fails with HTTP 400 on Unraid 7.2.4 — GraphQL Schema Mismatch Prevents All Entity Creation: Fixed storage coordinator failing to fetch array/disks/shares data on Unraid 7.2.4 due to a GraphQL schema change that added new required fields. The coordinator now uses the latest `unraid-api 1.7.1` version which includes updated queries and models compatible with Unraid 7.2.4, restoring functionality for users on that Unraid version.
 
+- **Notification Buttons Not Working**: Fixed the "Archive all unread notifications" and "Delete all archived notifications" buttons not functioning due to incorrect API method calls. The buttons now correctly call `archive_notification(notification_id)` and `delete_notification(notification_id)` for each relevant notification, allowing users to manage their Unraid notifications directly from Home Assistant.
+- **Storage Coordinator Fails with HTTP 400 on Unraid 7.2.4**: Fixed storage coordinator failing to fetch array/disks/shares data on Unraid 7.2.4 due to a GraphQL schema change that added new required fields. The coordinator now uses the latest `unraid-api 1.7.1` version which includes updated queries and models compatible with Unraid 7.2.4, restoring functionality for users on that Unraid version.
 
 ## [2026.3.1] - 2026-03-20
 
@@ -104,6 +122,9 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
   - Fixed connection failures when using non-standard ports with HTTP-only servers
   - Simplified port configuration - now uses single port value; library handles HTTPS fallback automatically
   - Better error reporting when custom ports are unreachable (no silent fallback to port 443)
+- Removed dummy port workaround from config flow and entry setup
+- Simplified connection testing logic (2 attempts instead of 3: with/without SSL verify)
+- Using library's `restart_container()` convenience method in Docker restart button
 
 ### Fixed
 
@@ -111,13 +132,6 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
   - Root cause: Port configuration was preventing HTTP probe, causing library to assume HTTPS on non-standard port
   - Now correctly probes HTTP on configured port and follows redirects to discover SSL/TLS mode
 - **Connection Error Messages**: Improved error reporting for unreachable custom ports - now clearly indicates port unreachable instead of SSL errors
-
-### Technical
-
-- Removed dummy port workaround from config flow and entry setup
-- Simplified connection testing logic (2 attempts instead of 3: with/without SSL verify)
-- Using library's `restart_container()` convenience method in Docker restart button
-- Test suite fully passing with high code coverage
 
 ## [2026.2.2] - 2026-02-03
 
@@ -280,7 +294,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 - HTTPS required for API communication
 - API key authentication via `x-api-key` header
 
-[Unreleased]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.3.0...HEAD
+[Unreleased]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.4.0...HEAD
+[2026.4.0]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.3.2...v2026.4.0
+[2026.3.2]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.3.1...v2026.3.2
+[2026.3.1]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.3.0...v2026.3.1
 [2026.3.0]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.2.3...v2026.3.0
 [2026.2.3]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.2.2...v2026.2.3
 [2026.2.2]: https://github.com/ruaan-deysel/ha-unraid/compare/v2026.2.1...v2026.2.2

@@ -526,15 +526,11 @@ def test_vm_switch_is_off_when_shut_down() -> None:
 
 
 def test_vm_switch_attributes() -> None:
-    """Test VM switch extra attributes."""
+    """Test VM switch extra attributes with state only (unraid-api 1.8.0+)."""
     vm = VmDomain(
         id="vm:1",
         name="Ubuntu",
         state="RUNNING",
-        memory=4096,
-        vcpu=4,
-        autostart=True,
-        primaryGpu="NVIDIA GeForce RTX 3080",
     )
     coordinator = MagicMock(spec=UnraidSystemCoordinator)
     coordinator.data = make_system_data(vms=[vm])
@@ -548,10 +544,11 @@ def test_vm_switch_attributes() -> None:
 
     attrs = switch.extra_state_attributes
     assert attrs["state"] == "RUNNING"
-    assert attrs["memory"] == 4096
-    assert attrs["vcpu"] == 4
-    assert attrs["auto_start"] is True
-    assert attrs["primary_gpu"] == "NVIDIA GeForce RTX 3080"
+    # VmDomain in unraid-api 1.8.0+ only has id, name, state
+    # Optional attributes (memory, vcpu, autostart, primaryGpu) are exposed
+    # via getattr() if present in future API versions
+    assert "memory" not in attrs
+    assert "vcpu" not in attrs
 
 
 def test_vm_switch_attributes_filters_none() -> None:
