@@ -292,6 +292,33 @@ class TestArrayUpdatesSubscription:
 
         storage_coordinator.async_request_refresh.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_array_update_state_none_skipped(self) -> None:
+        """Array events with state=None are skipped — prevents disk spin-ups (#211)."""
+        heartbeat = MagicMock()
+        heartbeat.state = None
+        real_update = MagicMock()
+        real_update.state = "STARTED"
+
+        async def mock_subscribe() -> Any:
+            yield heartbeat
+            yield heartbeat
+            yield real_update
+
+        storage_coordinator = AsyncMock()
+        api_client = AsyncMock()
+        api_client.subscribe_array_updates = mock_subscribe
+
+        manager = _make_manager(
+            api_client=api_client,
+            storage_coordinator=storage_coordinator,
+        )
+        manager._running = True
+        await manager._handle_array_updates()
+
+        # Only the real update (with state) should trigger a refresh.
+        storage_coordinator.async_request_refresh.assert_called_once()
+
 
 # =============================================================================
 # UnraidWebSocketManager — UPS Updates Subscription Tests
@@ -382,10 +409,10 @@ class TestRefreshDebounce:
         manager._running = True
 
         # First call at t=100 triggers; sets _last_array_refresh=100.
-        # Second call at t=105 (only 5 s elapsed) → debounced.
+        # Second call at t=105 (only 5 s elapsed < 60 s interval) → debounced.
         with patch(
             "custom_components.unraid.websocket.time.monotonic",
-            side_effect=[100.0, 100.0, 105.0],
+            side_effect=[100.0, 105.0],
         ):
             await manager._handle_array_updates()
 
@@ -413,10 +440,10 @@ class TestRefreshDebounce:
         )
         manager._running = True
 
-        # First call at t=100; second call at t=115 (15 s elapsed ≥ 10 s cooldown).
+        # First call at t=100; second call at t=165 (65 s elapsed ≥ 60 s interval).
         with patch(
             "custom_components.unraid.websocket.time.monotonic",
-            side_effect=[100.0, 100.0, 115.0, 115.0],
+            side_effect=[100.0, 165.0],
         ):
             await manager._handle_array_updates()
 

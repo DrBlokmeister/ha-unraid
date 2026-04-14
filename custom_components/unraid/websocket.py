@@ -17,6 +17,7 @@ from unraid_api.exceptions import (
 from unraid_api.models import DockerContainerStats
 
 from .const import (
+    WS_ARRAY_UPDATE_MIN_INTERVAL,
     WS_INITIAL_RETRY_DELAY,
     WS_MAX_RETRY_DELAY,
     WS_REFRESH_DEBOUNCE_SECONDS,
@@ -198,18 +199,32 @@ class UnraidWebSocketManager:
         async for update in self._api_client.subscribe_array_updates():
             if not self._running:
                 break
+            # Skip events with no state — these are periodic heartbeats that
+            # carry no meaningful change and would otherwise wake spun-down
+            # disks by triggering a storage coordinator refresh (#211).
+            if update.state is None:
+                _LOGGER.debug(
+                    "Skipping array update with state=None for %s",
+                    self._server_name,
+                )
+                continue
             _LOGGER.debug(
                 "Array update received for %s: state=%s",
                 self._server_name,
                 update.state,
             )
-            if self._should_trigger_refresh(self._last_array_refresh):
-                self._last_array_refresh = time.monotonic()
+            now = time.monotonic()
+            elapsed = now - self._last_array_refresh
+            if elapsed >= WS_ARRAY_UPDATE_MIN_INTERVAL:
+                self._last_array_refresh = now
                 await self._storage_coordinator.async_request_refresh()
             else:
                 _LOGGER.debug(
-                    "Array update for %s suppressed (debounce cooldown active)",
+                    "Array update for %s suppressed (last refresh %.0fs ago, "
+                    "min interval %ss)",
                     self._server_name,
+                    elapsed,
+                    WS_ARRAY_UPDATE_MIN_INTERVAL,
                 )
 
     async def _handle_ups_updates(self) -> None:
