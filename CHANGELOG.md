@@ -11,19 +11,25 @@ and this project adheres to [Calendar Versioning](https://calver.org/) (YYYY.MM.
 
 ### Added
 
+- **Docker Container Update Entities**: New `update` platform with per-container update entities ([#212](https://github.com/ruaan-deysel/ha-unraid/issues/212)) — shows available image updates with install action to pull the latest image directly from Home Assistant
 - **Network Access Sensor**: New diagnostic sensor (`sensor.{name}_network_access`) showing the primary LAN access URL with all access URLs (LAN/WAN, IPv4/IPv6) as extra attributes — powered by the new `Network` model from unraid-api v1.9.0
 - **Notification WebSocket Subscription**: Real-time notification push via `subscribe_notification_added` — new notifications trigger an immediate system coordinator refresh instead of waiting for the 30-second poll cycle
 - **Parity History WebSocket Subscription**: Live parity check progress updates via `subscribe_parity_history` — parity status changes trigger an immediate storage coordinator refresh instead of waiting for the 5-minute poll cycle
 
 ### Changed
 
-- **Updated unraid-api to v1.9.0**: Includes improved temperature filtering (bogus sensor removal in the library's `TemperatureMetrics` model validator), `ParityCheck.speed` type change from `int` to `str`, new `Network`/`AccessUrl` models, new WebSocket subscriptions for notifications and parity history, and capability detection for subscription gating
+- **Updated unraid-api to v1.9.1**: Includes improved temperature filtering (bogus sensor removal in the library's `TemperatureMetrics` model validator), `ParityCheck.speed` type change from `int` to `str`, new `Network`/`AccessUrl` models, new WebSocket subscriptions for notifications and parity history, capability detection for subscription gating, and `update_container()` support
 - **Parity Speed Sensor Updated**: Adapted to handle `ParityCheck.speed` being a string value (changed from `int` in unraid-api v1.9.0) — the sensor now safely converts the string to float before calculating MiB/s
+- **Array Update WebSocket Throttle**: Array state WebSocket events now use a dedicated 60-second minimum interval (up from the general 10-second debounce) to prevent rapid storage coordinator refreshes from waking spun-down disks ([#211](https://github.com/ruaan-deysel/ha-unraid/issues/211), [#206](https://github.com/ruaan-deysel/ha-unraid/issues/206))
 
 ### Fixed
 
 - **Parity Speed Sensor Type Error**: Fixed `TypeError` that would occur when `ParityCheck.speed` returned as a string (breaking change in unraid-api v1.9.0) — the sensor now handles both string and `None` values gracefully
-- **Flash Device Usage Sensor Availability**: Sensor now reports **Unavailable** instead of **Unknown** when the Unraid server does not return boot/flash device data (`array.boot = null`). This is a server-side data gap on some Unraid versions — the entity will automatically recover and show usage data once the server starts returning flash filesystem information
+- **WebSocket Array Heartbeats Causing Unnecessary Refreshes**: Array update events with `state=None` (periodic heartbeats) are now filtered out, preventing unnecessary storage coordinator refreshes that could wake spun-down disks and cause high CPU usage ([#211](https://github.com/ruaan-deysel/ha-unraid/issues/211))
+
+### Removed
+
+- **Flash Device Usage Sensor**: Removed `FlashUsageSensor` — the Unraid GraphQL API does not expose filesystem usage data for the boot/flash device, so this sensor was permanently unavailable ([#208](https://github.com/ruaan-deysel/ha-unraid/issues/208))
 
 ## [2026.3.2] - 2026-03-22
 
