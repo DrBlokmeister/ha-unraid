@@ -21,10 +21,6 @@
   description: "Further information is requested"
 
 # --- Status labels ---
-- name: "needs-triage"
-  color: "e4e669"
-  description: "Issue needs initial review and categorization"
-
 - name: "needs-info"
   color: "fbca04"
   description: "Waiting for more information from the reporter"
