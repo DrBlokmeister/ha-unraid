@@ -1560,23 +1560,6 @@ def _compute_disk_used_bytes(disk: ArrayDisk) -> int | None:
     return disk.fs_used_bytes
 
 
-def _find_flash_disk(data: UnraidStorageData) -> ArrayDisk | None:
-    """Return the best flash/boot disk candidate from storage data."""
-    if data.boot is not None:
-        return data.boot
-
-    # Defensive fallback for API responses where boot is missing but the
-    # flash device still appears in one of the disk collections.
-    candidates = (data.disks or []) + (data.parities or []) + (data.caches or [])
-    for disk in candidates:
-        disk_name = (disk.name or "").strip().lower()
-        disk_type = (disk.type or "").strip().upper()
-        if disk_name in {"boot", "flash"} or disk_type in {"BOOT", "FLASH"}:
-            return disk
-
-    return None
-
-
 class DiskUsageSensor(UnraidSensorEntity):
     """Disk usage percentage sensor with human-readable attributes."""
 
@@ -2221,67 +2204,6 @@ class ShareUsageSensor(UnraidSensorEntity):
         }
         attrs.update({k: v for k, v in extended.items() if v is not None})
         return attrs
-
-
-# Flash Device Sensor
-
-
-class FlashUsageSensor(UnraidSensorEntity):
-    """Flash/boot device usage percentage sensor with human-readable attributes."""
-
-    _attr_translation_key = "flash_usage"
-    _attr_native_unit_of_measurement = "%"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_suggested_display_precision = 1
-
-    def __init__(
-        self,
-        coordinator: UnraidStorageCoordinator,
-        server_uuid: str,
-        server_name: str,
-    ) -> None:
-        """Initialize flash usage sensor."""
-        super().__init__(
-            coordinator=coordinator,
-            server_uuid=server_uuid,
-            server_name=server_name,
-            resource_id="flash_usage",
-            name="Flash Device Usage",
-        )
-
-    def _get_flash_disk(self) -> ArrayDisk | None:
-        """Return flash/boot disk from current coordinator data."""
-        data: UnraidStorageData | None = self.coordinator.data
-        if data is None:
-            return None
-        return _find_flash_disk(data)
-
-    @property
-    def available(self) -> bool:
-        """Return True only when flash/boot data is present."""
-        return super().available and self._get_flash_disk() is not None
-
-    @property
-    def native_value(self) -> float | None:
-        """Return flash device usage percentage."""
-        flash = self._get_flash_disk()
-        if flash is None:
-            return None
-        return _compute_disk_usage_percent(flash)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return flash details as human-readable attributes."""
-        flash = self._get_flash_disk()
-        if flash is None:
-            return {}
-        return {
-            "total": format_bytes(flash.fs_size_bytes),
-            "used": format_bytes(_compute_disk_used_bytes(flash)),
-            "free": format_bytes(flash.fs_free_bytes),
-            "device": flash.device,
-            "status": flash.status,
-        }
 
 
 # =============================================================================
@@ -3017,9 +2939,6 @@ def _create_disk_sensors(
         entities.append(
             ShareUsageSensor(storage_coordinator, server_uuid, server_name, share)
         )
-
-    # Flash device sensor — always created (single expected entity per server)
-    entities.append(FlashUsageSensor(storage_coordinator, server_uuid, server_name))
 
     return entities
 
