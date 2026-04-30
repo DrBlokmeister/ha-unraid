@@ -19,12 +19,12 @@ from unraid_api.exceptions import (
     UnraidConnectionError,
     UnraidSSLError,
     UnraidTimeoutError,
-    UnraidVersionError,
 )
 from unraid_api.models import ServerInfo, UPSDevice, VersionInfo
 
 from custom_components.unraid.config_flow import CannotConnectError, SSLCertificateError
 from custom_components.unraid.const import (
+    CONF_IGNORE_SSL,
     CONF_UPS_CAPACITY_VA,
     CONF_UPS_NOMINAL_POWER,
     DEFAULT_PORT,
@@ -51,17 +51,14 @@ def mock_api_client() -> MagicMock:
     mock_api = MagicMock()
     mock_api.test_connection = AsyncMock(return_value=True)
     mock_api.get_version = AsyncMock(
-        return_value=VersionInfo(api="4.29.2", unraid="7.2.0")
-    )
-    mock_api.check_compatibility = AsyncMock(
-        return_value=VersionInfo(api="4.29.2", unraid="7.2.0")
+        return_value=VersionInfo(api="4.31.1", unraid="7.2.4")
     )
     mock_api.get_server_info = AsyncMock(
         return_value=ServerInfo(
             uuid="test-server-uuid",
             hostname="tower",
-            sw_version="7.2.0",
-            api_version="4.29.2",
+            sw_version="7.2.4",
+            api_version="4.31.1",
         )
     )
     mock_api.close = AsyncMock()
@@ -118,6 +115,7 @@ async def test_successful_connection(
         "port": DEFAULT_PORT,
         "api_key": "valid-api-key",
         "ssl": True,
+        "ignore_ssl": False,
     }
 
 
@@ -146,6 +144,7 @@ async def test_successful_connection_with_custom_port(
         "port": 8080,
         "api_key": "valid-api-key",
         "ssl": True,
+        "ignore_ssl": False,
     }
     mock_client_class.assert_called_with(
         host="unraid.local",
@@ -338,11 +337,16 @@ async def test_aiohttp_client_connector_error(hass: HomeAssistant) -> None:
 
 
 async def test_unsupported_version_error(hass: HomeAssistant) -> None:
-    """Test old Unraid version shows version error."""
+    """Test old API version shows version error."""
     mock_api = AsyncMock()
     mock_api.test_connection = AsyncMock(return_value=True)
-    mock_api.check_compatibility = AsyncMock(
-        side_effect=UnraidVersionError("Unraid 6.9.0 (API 4.10.0) not supported")
+    mock_api.get_server_info = AsyncMock(
+        return_value=ServerInfo(
+            uuid="test-uuid",
+            hostname="tower",
+            sw_version="6.9.0",
+            api_version="4.10.0",
+        )
     )
     mock_api.close = AsyncMock()
 
@@ -366,8 +370,8 @@ async def test_duplicate_config_entry(
     mock_api_client.get_server_info.return_value = ServerInfo(
         uuid="same-server-uuid",
         hostname="tower",
-        sw_version="7.2.0",
-        api_version="4.29.2",
+        sw_version="7.2.4",
+        api_version="4.31.1",
     )
 
     with patch(
@@ -398,8 +402,8 @@ async def test_placeholder_uuid_combines_with_hostname(
     mock_api_client.get_server_info.return_value = ServerInfo(
         uuid="03000200-0400-0500-0006-000700080009",
         hostname="tower",
-        sw_version="7.2.0",
-        api_version="4.29.2",
+        sw_version="7.2.4",
+        api_version="4.31.1",
     )
 
     with patch(
@@ -426,8 +430,8 @@ async def test_placeholder_uuid_allows_multiple_servers(
     mock_api_client.get_server_info.return_value = ServerInfo(
         uuid=placeholder_uuid,
         hostname="tower",
-        sw_version="7.2.0",
-        api_version="4.29.2",
+        sw_version="7.2.4",
+        api_version="4.31.1",
     )
     with patch(
         "custom_components.unraid.config_flow.UnraidClient",
@@ -446,8 +450,8 @@ async def test_placeholder_uuid_allows_multiple_servers(
     mock_api_client.get_server_info.return_value = ServerInfo(
         uuid=placeholder_uuid,
         hostname="beelink",
-        sw_version="7.2.0",
-        api_version="4.29.2",
+        sw_version="7.2.4",
+        api_version="4.31.1",
     )
     with patch(
         "custom_components.unraid.config_flow.UnraidClient",
@@ -471,8 +475,8 @@ async def test_placeholder_uuid_same_hostname_still_rejected(
     mock_api_client.get_server_info.return_value = ServerInfo(
         uuid=placeholder_uuid,
         hostname="tower",
-        sw_version="7.2.0",
-        api_version="4.29.2",
+        sw_version="7.2.4",
+        api_version="4.31.1",
     )
 
     with patch(
@@ -503,8 +507,8 @@ async def test_normal_uuid_not_combined_with_hostname(
     mock_api_client.get_server_info.return_value = ServerInfo(
         uuid="real-unique-uuid-1234",
         hostname="tower",
-        sw_version="7.2.0",
-        api_version="4.29.2",
+        sw_version="7.2.4",
+        api_version="4.31.1",
     )
 
     with patch(
@@ -665,17 +669,14 @@ async def test_ssl_error_retries_with_verify_disabled(
         else:
             mock_api.test_connection = AsyncMock(return_value=True)
             mock_api.get_version = AsyncMock(
-                return_value=VersionInfo(api="4.29.2", unraid="7.2.0")
-            )
-            mock_api.check_compatibility = AsyncMock(
-                return_value=VersionInfo(api="4.29.2", unraid="7.2.0")
+                return_value=VersionInfo(api="4.31.1", unraid="7.2.4")
             )
             mock_api.get_server_info = AsyncMock(
                 return_value=ServerInfo(
                     uuid="test-uuid",
                     hostname="tower",
-                    sw_version="7.2.0",
-                    api_version="4.29.2",
+                    sw_version="7.2.4",
+                    api_version="4.31.1",
                 )
             )
         return mock_api
@@ -694,7 +695,8 @@ async def test_ssl_error_retries_with_verify_disabled(
     created_clients[1].close.assert_awaited_once()
     assert result2["type"] is FlowResultType.CREATE_ENTRY
     assert result2["result"].unique_id == "test-uuid"
-    assert result2["data"]["ssl"] is False  # SSL verification disabled for self-signed
+    assert result2["data"]["ssl"] is True
+    assert result2["data"]["ignore_ssl"] is True
 
 
 async def test_non_ssl_connection_error_does_not_retry_with_verify_disabled(
@@ -726,6 +728,39 @@ async def test_non_ssl_connection_error_does_not_retry_with_verify_disabled(
         )
 
     assert call_count == 1
+    assert result2["type"] is FlowResultType.FORM
+    assert result2["errors"][CONF_HOST] == "cannot_connect"
+
+
+async def test_ssl_error_on_both_attempts_returns_cannot_connect(
+    hass: HomeAssistant, mock_setup_entry: None
+) -> None:
+    """Test repeated SSL verification failures return cannot_connect (not unknown)."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+
+    call_count = 0
+
+    def create_client(**kwargs: object) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        mock_api = MagicMock()
+        mock_api.close = AsyncMock()
+        mock_api.test_connection = AsyncMock(
+            side_effect=SSLCertificateError("SSL certificate verify failed")
+        )
+        return mock_api
+
+    with patch(
+        "custom_components.unraid.config_flow.UnraidClient", side_effect=create_client
+    ):
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_HOST: "unraid.local", CONF_API_KEY: "valid-key"},
+        )
+
+    assert call_count == 2
     assert result2["type"] is FlowResultType.FORM
     assert result2["errors"][CONF_HOST] == "cannot_connect"
 
@@ -902,6 +937,7 @@ async def test_reauth_flow_adds_ssl_flag_for_legacy_entries(
     assert result2["type"] is FlowResultType.ABORT
     assert result2["reason"] == "reauth_successful"
     assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is False
 
 
 async def test_reauth_flow_updates_ssl_flag_when_cert_changes(
@@ -934,12 +970,16 @@ async def test_reauth_flow_updates_ssl_flag_when_cert_changes(
             )
         else:
             mock_api.test_connection = AsyncMock(return_value=True)
-            mock_api.check_compatibility = AsyncMock()
             mock_api.get_version = AsyncMock(
-                return_value={"unraid": "7.2.0", "api": "4.29.2"}
+                return_value={"unraid": "7.2.4", "api": "4.31.1"}
             )
             mock_api.get_server_info = AsyncMock(
-                return_value=MagicMock(uuid="test-uuid", hostname="tower")
+                return_value=ServerInfo(
+                    uuid="test-uuid",
+                    hostname="tower",
+                    sw_version="7.2.4",
+                    api_version="4.31.1",
+                )
             )
         return mock_api
 
@@ -953,8 +993,8 @@ async def test_reauth_flow_updates_ssl_flag_when_cert_changes(
 
     assert result2["type"] is FlowResultType.ABORT
     assert result2["reason"] == "reauth_successful"
-    # SSL flag should be updated to False since cert verification failed
-    assert entry.data[CONF_SSL] is False
+    assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is True
 
 
 async def test_reauth_flow_invalid_key(
@@ -1069,8 +1109,13 @@ async def test_reauth_flow_unsupported_version_error(
 
     mock_api = AsyncMock()
     mock_api.test_connection = AsyncMock()
-    mock_api.check_compatibility = AsyncMock(
-        side_effect=UnraidVersionError("Unraid 6.0.0 (API 0.0.1) not supported")
+    mock_api.get_server_info = AsyncMock(
+        return_value=ServerInfo(
+            uuid="test-uuid",
+            hostname="tower",
+            sw_version="6.0.0",
+            api_version="0.0.1",
+        )
     )
     mock_api.close = AsyncMock()
 
@@ -1360,12 +1405,13 @@ async def test_reconfigure_flow_success(
     assert entry.data[CONF_HOST] == "192.168.1.100"
     assert entry.data[CONF_API_KEY] == "new-key"
     assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is False
 
 
 async def test_reconfigure_flow_updates_ssl_flag_when_cert_changes(
     hass: HomeAssistant, mock_setup_entry: None, mock_api_client: MagicMock
 ) -> None:
-    """Test reconfigure flow clears SSL flag when SSL fallback succeeds."""
+    """Test reconfigure flow sets ignore_ssl when SSL fallback succeeds."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="tower",
@@ -1387,7 +1433,7 @@ async def test_reconfigure_flow_updates_ssl_flag_when_cert_changes(
         },
     )
 
-    # Simulate SSL error on first attempt and success on fallback without SSL.
+    # Simulate SSL error on first attempt and success with verify_ssl=False.
     mock_api_client.test_connection = AsyncMock(
         side_effect=[UnraidSSLError("SSL error"), True]
     )
@@ -1405,7 +1451,8 @@ async def test_reconfigure_flow_updates_ssl_flag_when_cert_changes(
     assert result2["reason"] == "reconfigure_successful"
     assert entry.data[CONF_HOST] == "192.168.1.100"
     assert entry.data[CONF_API_KEY] == "new-key"
-    assert entry.data[CONF_SSL] is False
+    assert entry.data[CONF_SSL] is True
+    assert entry.data[CONF_IGNORE_SSL] is True
 
 
 async def test_reconfigure_flow_connection_error(
@@ -1555,8 +1602,13 @@ async def test_reconfigure_flow_unsupported_version_error(
 
     mock_api = AsyncMock()
     mock_api.test_connection = AsyncMock()
-    mock_api.check_compatibility = AsyncMock(
-        side_effect=UnraidVersionError("Unraid 6.0.0 (API 0.0.1) not supported")
+    mock_api.get_server_info = AsyncMock(
+        return_value=ServerInfo(
+            uuid="test-uuid",
+            hostname="tower",
+            sw_version="6.0.0",
+            api_version="0.0.1",
+        )
     )
     mock_api.close = AsyncMock()
 
@@ -1957,11 +2009,16 @@ async def test_options_flow_aborts_without_ups_from_user_flow(
 async def test_version_parsing_failure_rejected(
     hass: HomeAssistant, mock_setup_entry: None
 ) -> None:
-    """Test that malformed version strings result in connection rejection."""
+    """Test that missing API version string results in connection rejection."""
     mock_api = AsyncMock()
     mock_api.test_connection = AsyncMock(return_value=True)
-    mock_api.check_compatibility = AsyncMock(
-        side_effect=UnraidVersionError("Version parsing failed: invalid-version")
+    mock_api.get_server_info = AsyncMock(
+        return_value=ServerInfo(
+            uuid="test-uuid",
+            hostname="tower",
+            sw_version="7.2.4",
+            api_version=None,
+        )
     )
     mock_api.close = AsyncMock()
 
