@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import aiohttp
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -572,3 +574,45 @@ class TestReconnection:
         await manager._run_subscription("test", cancelled_handler)
 
         assert call_count == 1
+
+
+    @pytest.mark.asyncio
+    async def test_client_connection_reset_is_recoverable(self, caplog: pytest.LogCaptureFixture) -> None:
+        """ClientConnectionResetError is treated as recoverable and retried."""
+        call_count = 0
+
+        async def failing_handler() -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 3:
+                manager._running = False
+                return
+            raise aiohttp.ClientConnectionResetError("Cannot write to closing transport")
+
+        manager = _make_manager()
+        manager._running = True
+
+        with patch("custom_components.unraid.websocket.asyncio.sleep") as mock_sleep:
+            mock_sleep.return_value = None
+            with caplog.at_level("WARNING"):
+                await manager._run_subscription("notification_added", failing_handler)
+
+        assert call_count == 3
+        assert mock_sleep.call_count >= 2
+        assert "Unexpected error in notification_added WebSocket" not in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_unexpected_error_still_logs_error(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Unexpected exceptions remain error-level with traceback."""
+
+        async def bad_handler() -> None:
+            manager._running = False
+            raise ValueError("boom")
+
+        manager = _make_manager()
+        manager._running = True
+
+        with caplog.at_level("ERROR"):
+            await manager._run_subscription("notification_added", bad_handler)
+
+        assert "Unexpected error in notification_added WebSocket" in caplog.text
