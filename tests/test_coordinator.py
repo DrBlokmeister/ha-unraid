@@ -1624,6 +1624,14 @@ async def test_storage_coordinator_runtime_error_handled(
 # =============================================================================
 
 
+class _NotificationListWrapper:
+    """Test helper to mimic typed notification wrapper objects."""
+
+    def __init__(self, notifications: list[dict[str, str]]) -> None:
+        """Initialize wrapper with notification list."""
+        self.list = notifications
+
+
 def _make_notification(
     notification_id: str,
     timestamp: str,
@@ -1742,6 +1750,181 @@ async def test_notification_events_emit_oldest_first(
     assert listener.call_count == 2
     ordered_ids = [call.args[0].notification_id for call in listener.call_args_list]
     assert ordered_ids == ["older", "newer"]
+
+
+
+
+@pytest.mark.asyncio
+async def test_notification_events_none_response_ignored(
+    hass, mock_api_client, mock_config_entry, caplog
+):
+    """Test None notification response yields no events and no invalid-ID warning."""
+    mock_api_client.typed_get_notifications.return_value = None
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+
+    listener.assert_not_called()
+    assert "Skipping notification without ID" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_notification_events_string_response_ignored(
+    hass, mock_api_client, mock_config_entry, caplog
+):
+    """Test string notification response is ignored instead of iterated by character."""
+    mock_api_client.typed_get_notifications.return_value = "oops"
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    await coordinator._async_update_data()
+
+    assert "Skipping notification without ID" not in caplog.text
+    assert coordinator._seen_notification_ids == set()
+
+
+@pytest.mark.asyncio
+async def test_notification_events_scalar_response_ignored(
+    hass, mock_api_client, mock_config_entry, caplog
+):
+    """Test numeric notification response is ignored safely."""
+    mock_api_client.typed_get_notifications.return_value = 123
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    await coordinator._async_update_data()
+
+    assert "Skipping notification without ID" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_notification_events_model_list_response_supported(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test wrapper/model notification response with `.list` is supported."""
+    mock_api_client.typed_get_notifications.return_value = _NotificationListWrapper(
+        [_make_notification("existing", "2026-04-24T08:01:04.000Z")]
+    )
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+
+    mock_api_client.typed_get_notifications.return_value = _NotificationListWrapper(
+        [
+            _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+            _make_notification("new", "2026-04-24T08:03:04.000Z"),
+        ]
+    )
+    await coordinator._async_update_data()
+
+    assert listener.call_count == 1
+    assert listener.call_args.args[0].notification_id == "new"
+
+@pytest.mark.asyncio
+async def test_notification_events_extract_from_dict_response_and_emit(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test dict notification responses extract list payload and emit unseen events."""
+    mock_api_client.typed_get_notifications.return_value = {
+        "overview": {"unread": {"total": 1}},
+        "list": [_make_notification("existing", "2026-04-24T08:01:04.000Z")],
+    }
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+    listener.assert_not_called()
+
+    mock_api_client.typed_get_notifications.return_value = {
+        "overview": {"unread": {"total": 2}},
+        "list": [
+            _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+            _make_notification("new", "2026-04-24T08:03:04.000Z"),
+        ],
+    }
+    await coordinator._async_update_data()
+
+    assert listener.call_count == 1
+    assert listener.call_args.args[0].event_type == "notification_created"
+    assert listener.call_args.args[0].notification_id == "new"
+
+
+@pytest.mark.asyncio
+async def test_notification_events_empty_dict_list_does_not_warn_missing_id(
+    hass, mock_api_client, mock_config_entry, caplog
+):
+    """Test dict responses with empty list do not process top-level keys as items."""
+    mock_api_client.typed_get_notifications.return_value = {
+        "overview": {"unread": {"total": 0}},
+        "list": [],
+    }
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    await coordinator._async_update_data()
+
+    assert "Skipping notification without ID" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_notification_events_list_response_still_works(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test list notification responses remain supported."""
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("existing", "2026-04-24T08:01:04.000Z")
+    ]
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+        _make_notification("new", "2026-04-24T08:03:04.000Z"),
+    ]
+    await coordinator._async_update_data()
+
+    assert listener.call_count == 1
+    assert listener.call_args.args[0].notification_id == "new"
+
+
+@pytest.mark.asyncio
+async def test_notification_response_dict_keys_never_processed_as_items(
+    hass, mock_api_client, mock_config_entry, caplog
+):
+    """Regression test for dict key iteration bug in notification extraction."""
+    mock_api_client.typed_get_notifications.return_value = {
+        "overview": {"unread": {"total": 1}},
+        "list": [_make_notification("only", "2026-04-24T08:01:04.000Z")],
+    }
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    await coordinator._async_update_data()
+
+    assert "Skipping notification without ID" not in caplog.text
+    assert "overview" not in coordinator._seen_notification_ids
+    assert "list" not in coordinator._seen_notification_ids
+    assert "only" in coordinator._seen_notification_ids
 
 
 @pytest.mark.asyncio
