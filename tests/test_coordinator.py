@@ -1705,6 +1705,33 @@ async def test_notification_events_emit_new_unread_once(
 
 
 @pytest.mark.asyncio
+async def test_notification_event_dedup_when_websocket_and_polling_overlap(
+    hass, mock_api_client, mock_config_entry
+):
+    """Same notification ID seen in overlapping refreshes emits once."""
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+    ]
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+        _make_notification("same-id", "2026-04-24T08:03:04.000Z"),
+    ]
+    await coordinator._async_update_data()  # WebSocket-triggered refresh
+    await coordinator._async_update_data()  # Normal polling refresh
+
+    assert listener.call_count == 1
+    assert listener.call_args.args[0].notification_id == "same-id"
+
+
+@pytest.mark.asyncio
 async def test_notification_events_ignore_archived_notifications(
     hass, mock_api_client, mock_config_entry
 ):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+
+import aiohttp
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -70,6 +72,7 @@ class UnraidWebSocketManager:
         self._last_ups_refresh: float = 0.0
         self._last_notification_refresh: float = 0.0
         self._last_parity_refresh: float = 0.0
+        self._recoverable_error_counts: dict[str, int] = {}
 
     async def async_start(self) -> None:
         """Start all WebSocket subscriptions as background tasks."""
@@ -151,16 +154,22 @@ class UnraidWebSocketManager:
             except (UnraidConnectionError, UnraidTimeoutError, UnraidAPIError) as err:
                 if not self._running:
                     return
-                _LOGGER.debug(
-                    "WebSocket %s disconnected for %s: %s — retrying in %ss",
-                    name,
-                    self._server_name,
-                    err,
-                    retry_delay,
-                )
+                self._log_recoverable_disconnect(name, err, retry_delay)
+
+            except (
+                aiohttp.ClientConnectionResetError,
+                aiohttp.ClientConnectionError,
+                aiohttp.ClientPayloadError,
+                asyncio.TimeoutError,
+                ConnectionResetError,
+                OSError,
+            ) as err:
+                if not self._running:
+                    return
+                self._log_recoverable_disconnect(name, err, retry_delay)
 
             except asyncio.CancelledError:
-                return
+                raise
 
             except Exception:
                 if not self._running:
@@ -180,6 +189,39 @@ class UnraidWebSocketManager:
             except asyncio.CancelledError:
                 return
             retry_delay = min(retry_delay * WS_RETRY_BACKOFF_FACTOR, WS_MAX_RETRY_DELAY)
+
+    def _log_recoverable_disconnect(
+        self,
+        subscription_name: str,
+        err: Exception,
+        retry_delay: float,
+    ) -> None:
+        """Log recoverable disconnections with bounded verbosity."""
+        count = self._recoverable_error_counts.get(subscription_name, 0) + 1
+        self._recoverable_error_counts[subscription_name] = count
+
+        if count == 1 or count % 10 == 0:
+            _LOGGER.warning(
+                "Recoverable WebSocket disconnect in %s for %s: %s "
+                "(attempt %s, retrying in %ss)",
+                subscription_name,
+                self._server_name,
+                err,
+                count,
+                retry_delay,
+                exc_info=_LOGGER.isEnabledFor(logging.DEBUG),
+            )
+            return
+
+        _LOGGER.debug(
+            "Recoverable WebSocket disconnect in %s for %s: %s "
+            "(attempt %s, retrying in %ss)",
+            subscription_name,
+            self._server_name,
+            err,
+            count,
+            retry_delay,
+        )
 
     def _should_trigger_refresh(self, last_refresh_time: float) -> bool:
         """Return True if enough time has elapsed since the last refresh."""
