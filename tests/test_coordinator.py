@@ -182,6 +182,7 @@ def mock_api_client():
     client.typed_get_vars = AsyncMock(return_value=None)
     client.typed_get_plugins = AsyncMock(return_value=[])
     client.typed_get_network = AsyncMock(return_value=None)
+    client.typed_get_notifications = AsyncMock(return_value=[])
     client.close = AsyncMock()
     client.archive_all_notifications = AsyncMock(return_value={})
     client.delete_all_notifications = AsyncMock(return_value={})
@@ -1616,6 +1617,152 @@ async def test_storage_coordinator_runtime_error_handled(
 
     with pytest.raises(UpdateFailed, match="Connection error"):
         await coordinator._async_update_data()
+
+
+# =============================================================================
+# Notification Event Detection Tests
+# =============================================================================
+
+
+def _make_notification(
+    notification_id: str,
+    timestamp: str,
+    *,
+    notification_type: str = "UNREAD",
+) -> dict[str, str]:
+    """Create a test notification payload."""
+    return {
+        "id": notification_id,
+        "title": f"Title {notification_id}",
+        "subject": f"Subject {notification_id}",
+        "description": f"Description {notification_id}",
+        "timestamp": timestamp,
+        "formattedTimestamp": timestamp,
+        "importance": "INFO",
+        "link": "",
+        "type": notification_type,
+    }
+
+
+@pytest.mark.asyncio
+async def test_notification_events_first_run_baselines_without_emitting(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test first run stores unread IDs and emits no events."""
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("n1", "2026-04-24T08:01:04.000Z"),
+        _make_notification("n2", "2026-04-24T08:02:04.000Z"),
+    ]
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+
+    listener.assert_not_called()
+    assert coordinator._seen_notification_ids == {"n1", "n2"}
+
+
+@pytest.mark.asyncio
+async def test_notification_events_emit_new_unread_once(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test new unread notification emits exactly once."""
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+    ]
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+    listener.assert_not_called()
+
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("existing", "2026-04-24T08:01:04.000Z"),
+        _make_notification("new", "2026-04-24T08:03:04.000Z"),
+    ]
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+
+    assert listener.call_count == 1
+    event_data = listener.call_args.args[0]
+    assert event_data.event_type == "notification_created"
+    assert event_data.notification_id == "new"
+
+
+@pytest.mark.asyncio
+async def test_notification_events_ignore_archived_notifications(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test archived notifications never emit events."""
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification(
+            "archived-notification",
+            "2026-04-24T08:01:04.000Z",
+            notification_type="ARCHIVE",
+        )
+    ]
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+
+    await coordinator._async_update_data()
+
+    listener.assert_not_called()
+    assert "archived-notification" not in coordinator._seen_notification_ids
+
+
+@pytest.mark.asyncio
+async def test_notification_events_emit_oldest_first(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test multiple unseen notifications are emitted oldest-first."""
+    mock_api_client.typed_get_notifications.return_value = []
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    listener = MagicMock()
+    coordinator.async_add_event_listener(listener, "notification_created")
+    await coordinator._async_update_data()
+
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("newer", "2026-04-24T08:03:04.000Z"),
+        _make_notification("older", "2026-04-24T08:02:04.000Z"),
+    ]
+    await coordinator._async_update_data()
+
+    assert listener.call_count == 2
+    ordered_ids = [call.args[0].notification_id for call in listener.call_args_list]
+    assert ordered_ids == ["older", "newer"]
+
+
+@pytest.mark.asyncio
+async def test_notification_events_api_failure_keeps_seen_ids(
+    hass, mock_api_client, mock_config_entry
+):
+    """Test notification API failure does not clear seen IDs."""
+    mock_api_client.typed_get_notifications.return_value = [
+        _make_notification("seen", "2026-04-24T08:01:04.000Z")
+    ]
+    coordinator = UnraidSystemCoordinator(
+        hass, mock_api_client, "tower", mock_config_entry
+    )
+    await coordinator._async_update_data()
+
+    mock_api_client.typed_get_notifications.side_effect = UnraidConnectionError(
+        "notification query failed"
+    )
+    await coordinator._async_update_data()
+
+    assert coordinator._seen_notification_ids == {"seen"}
 
 
 # =============================================================================
