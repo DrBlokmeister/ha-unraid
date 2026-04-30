@@ -252,33 +252,84 @@ class UnraidSystemCoordinator(DataUpdateCoordinator[UnraidSystemData]):
             self._server_name,
         )
 
+    @staticmethod
+    def _normalize_notification_response(response: Any) -> list[Any]:
+        """Normalize notification responses into a list of notification records."""
+        if response is None:
+            return []
+
+        if isinstance(response, dict):
+            return list(response.get("list") or [])
+
+        model_list = getattr(response, "list", None)
+        if model_list is not None:
+            return list(model_list or [])
+
+        if isinstance(response, list):
+            return response
+
+        if isinstance(response, tuple):
+            return list(response)
+
+        _LOGGER.debug(
+            "Ignoring unexpected notification response type: %s",
+            type(response).__name__,
+        )
+        return []
+
+    @staticmethod
+    def _notification_response_shape(response: Any) -> str:
+        """Return a compact response shape string for debug logging."""
+        if isinstance(response, dict):
+            list_value = response.get("list")
+            list_count = len(list_value) if isinstance(list_value, list) else "n/a"
+            return (
+                f"dict(keys={sorted(response.keys())}, "
+                f"list_type={type(list_value).__name__}, list_count={list_count})"
+            )
+
+        if isinstance(response, list):
+            return f"list(len={len(response)})"
+
+        return type(response).__name__
+
     async def _async_get_unread_notifications(self) -> list[Any]:
         """Fetch unread notifications via available API wrapper methods."""
         _LOGGER.debug("Polling unread notifications for %s", self._server_name)
         try:
             if hasattr(self.api_client, "typed_get_notifications"):
-                notifications = await self.api_client.typed_get_notifications(
+                response = await self.api_client.typed_get_notifications(
                     notification_type="UNREAD",
                     offset=0,
                     limit=200,
                 )
-                notification_list = list(notifications)
                 _LOGGER.debug(
-                    "Fetched %d unread notifications for %s via typed API",
+                    "Unread notifications API path=typed_get_notifications shape=%s for %s",
+                    self._notification_response_shape(response),
+                    self._server_name,
+                )
+                notification_list = self._normalize_notification_response(response)
+                _LOGGER.debug(
+                    "Extracted %d unread notification records for %s via typed API",
                     len(notification_list),
                     self._server_name,
                 )
                 return notification_list
 
             if hasattr(self.api_client, "get_notifications"):
-                notifications = await self.api_client.get_notifications(
+                response = await self.api_client.get_notifications(
                     notification_type="UNREAD",
                     offset=0,
                     limit=200,
                 )
-                notification_list = list(notifications)
                 _LOGGER.debug(
-                    "Fetched %d unread notifications for %s via API",
+                    "Unread notifications API path=get_notifications shape=%s for %s",
+                    self._notification_response_shape(response),
+                    self._server_name,
+                )
+                notification_list = self._normalize_notification_response(response)
+                _LOGGER.debug(
+                    "Extracted %d unread notification records for %s via API",
                     len(notification_list),
                     self._server_name,
                 )
